@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Apex Velocity: Overdrive | Real Arcade Racing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&family=Teko:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <!-- 3D Canvas Container -->
+  <div id="canvas-container"></div>
+
+  <!-- Speed Radial Motion Blur & FX Overlay -->
+  <div id="speed-lines-vfx" class="vfx-overlay"></div>
+  <div id="nitro-tunnel-vfx" class="vfx-overlay"></div>
+
+  <!-- EXACT IN-GAME RACING HUD MATCHING REFERENCE -->
+  <div id="hud-container">
+    <!-- Top Left: Progress Percentage -->
+    <div id="hud-top-left">
+      <div class="progress-title">PROGRESS</div>
+      <div class="progress-value"><span id="race-progress-num">0</span> %</div>
+    </div>
+
+    <!-- Top Center: Camera Icon, Speedometer, Hazard Icon & Curved Nitro Bar -->
+    <div id="hud-top-center">
+      <div class="speedo-header-row">
+        <!-- Camera Toggle Circle Button -->
+        <button id="btn-cam-circle" class="round-hud-btn" title="Toggle Camera (C)">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff">
+            <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+          </svg>
+        </button>
+
+        <!-- Speed Display -->
+        <div class="speed-cluster">
+          <div id="speed-number">0</div>
+          <div class="speed-unit">KM/H</div>
+        </div>
+
+        <!-- Reset / Hazard Circle Button -->
+        <button id="btn-reset-circle" class="round-hud-btn" title="Reset Car (R)">
+          <span class="exclamation-glyph">!</span>
+        </button>
+
+        <!-- Home / Pause Circle Button -->
+        <button id="btn-menu-circle" class="round-hud-btn" title="Pause / Menu (ESC)">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="#1e293b">
+            <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Curved Segmented Nitro Gauge -->
+      <div class="nitro-arc-container">
+        <!-- Nitro Canister Glyph -->
+        <div class="nitro-canister-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="#00c8ff">
+            <path d="M12 2c-.55 0-1 .45-1 1v1H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3V3c0-.55-.45-1-1-1zm-1 6h2v4h2l-4 6v-4H9l2-6z"/>
+          </svg>
+        </div>
+
+        <!-- 12 Curved Rounded Nitro Segments -->
+        <div class="nitro-segments-row" id="nitro-segments-wrapper">
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment active"></div>
+          <div class="nitro-segment"></div>
+          <div class="nitro-segment"></div>
+          <div class="nitro-segment"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Right: Position, Lap & Race Timer -->
+    <div id="hud-top-right">
+      <div class="pos-title">POS</div>
+      <div class="pos-value"><span id="player-pos-num">1</span>/2</div>
+      <div class="lap-pill" id="hud-lap-pill">
+        <span id="lap-display">LAP 1/2</span>
+      </div>
+      <div class="race-timer-pill">
+        <span id="race-timer-display">0:00.00</span>
+      </div>
+    </div>
+
+    <!-- Bottom Center: Sleek PC Controls Helper Bar -->
+    <div id="hud-pc-controls-hint">
+      <span>WASD</span> / <span>ARROWS</span> : DRIVE &nbsp;&bull;&nbsp; <span>SHIFT</span> : NITRO &nbsp;&bull;&nbsp; <span>SPACE</span> : DRIFT &nbsp;&bull;&nbsp; <span>C</span> : CAMERA &nbsp;&bull;&nbsp; <span>R</span> : RESET
+    </div>
+  </div>
+
+  <!-- START RACE OVERHEAD LIGHTS (3-2-1-GO) -->
+  <div id="countdown-overlay" class="hidden">
+    <div class="gantry-lights">
+      <div class="light-pod" id="light-1"><div class="bulb"></div></div>
+      <div class="light-pod" id="light-2"><div class="bulb"></div></div>
+      <div class="light-pod" id="light-3"><div class="bulb"></div></div>
+      <div class="light-pod" id="light-go"><div class="bulb green"></div></div>
+    </div>
+    <div id="countdown-text">READY</div>
+  </div>
+
+  <!-- HOME MENU (MAIN MENU & LEVEL SELECTION) -->
+  <div id="home-menu-overlay" class="menu-overlay">
+    <div class="menu-glass-panel">
+      <!-- Title Header -->
+      <div class="menu-title-block">
+        <div class="game-edition-tag">MADE BY RAJAMANI</div>
+        <h1 class="game-main-title">APEX VELOCITY</h1>
+        <div class="game-subtitle-row">
+          <span class="subtitle-badge">BHARAT GP</span>
+          <span class="subtitle-spec">MADE BY RAJAMANI // 5 ICONIC INDIAN CIRCUITS // REAL PBR ENGINE</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="menu-tabs-bar">
+        <button class="menu-tab-btn active" data-tab="tab-levels">RACE LEVELS</button>
+        <button class="menu-tab-btn" data-tab="tab-garage">GARAGE & COLORS</button>
+        <button class="menu-tab-btn" data-tab="tab-audio">AUDIO & SOUND</button>
+        <button class="menu-tab-btn" data-tab="tab-controls">CONTROLS GUIDE</button>
+      </div>
+
+      <!-- Tab Content 1: Level Selection -->
+      <div id="tab-levels" class="tab-pane active">
+        <div class="levels-grid" id="levels-container">
+          <!-- Populated dynamically by UIManager -->
+        </div>
+      </div>
+
+      <!-- Tab Content 2: Garage & Color Picker -->
+      <div id="tab-garage" class="tab-pane">
+        <div class="garage-panel">
+          <div class="car-info-header">
+            <h3 id="garage-car-name">SCUDERIA GT</h3>
+            <span class="car-badge">V8 MID-ENGINE EXOTIC</span>
+          </div>
+          <div class="car-color-section">
+            <span class="section-label">SELECT EXTERIOR COLOR:</span>
+            <div class="color-swatches" id="color-swatches-wrapper">
+              <button class="color-swatch-btn active" data-color="0xdc2020" style="--swatch-color: #dc2020;" title="Rosso Corsa Red"></button>
+              <button class="color-swatch-btn" data-color="0xfacc15" style="--swatch-color: #facc15;" title="Giallo Modena Yellow"></button>
+              <button class="color-swatch-btn" data-color="0x00f0ff" style="--swatch-color: #00f0ff;" title="Miami Cyber Cyan"></button>
+              <button class="color-swatch-btn" data-color="0x9333ea" style="--swatch-color: #9333ea;" title="Ultraviolet Purple"></button>
+              <button class="color-swatch-btn" data-color="0x18181b" style="--swatch-color: #18181b;" title="Stealth Nero Black"></button>
+              <button class="color-swatch-btn" data-color="0x22c55e" style="--swatch-color: #22c55e;" title="Verde Mantis Green"></button>
+            </div>
+          </div>
+          <div class="car-specs-grid">
+            <div class="spec-card">
+              <span class="spec-label">TOP SPEED</span>
+              <span class="spec-value">325 <small>KM/H</small></span>
+            </div>
+            <div class="spec-card">
+              <span class="spec-label">0 - 100 KM/H</span>
+              <span class="spec-value">3.2 <small>SEC</small></span>
+            </div>
+            <div class="spec-card">
+              <span class="spec-label">POWER</span>
+              <span class="spec-value">670 <small>HP</small></span>
+            </div>
+            <div class="spec-card">
+              <span class="spec-label">TRANSMISSION</span>
+              <span class="spec-value">6-SPEED <small>DUAL-CLUTCH</small></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content 3: Audio & Sound Settings -->
+      <div id="tab-audio" class="tab-pane">
+        <div class="audio-settings-panel">
+          <div class="settings-header">
+            <h3>SOUND & MUSIC SETTINGS</h3>
+            <span class="settings-badge">STEREO / SURROUND MIX</span>
+          </div>
+
+          <div class="audio-settings-grid">
+            <!-- 1. Master Volume -->
+            <div class="setting-card">
+              <div class="setting-title-row">
+                <div class="setting-info">
+                  <strong>MASTER VOLUME</strong>
+                  <span>Main output audio level for game</span>
+                </div>
+                <div class="setting-actions">
+                  <span class="vol-badge" id="val-master-volume">85%</span>
+                  <button id="btn-toggle-mute" class="small-pill-btn" title="Toggle Mute All">MUTE</button>
+                </div>
+              </div>
+              <input type="range" min="0" max="100" value="85" class="custom-slider" id="slider-master-volume" />
+            </div>
+
+            <!-- 2. Music Volume & Toggle -->
+            <div class="setting-card">
+              <div class="setting-title-row">
+                <div class="setting-info">
+                  <strong>MUSIC VOLUME</strong>
+                  <span>In-race synth beats & menu soundtrack</span>
+                </div>
+                <div class="setting-actions">
+                  <span class="vol-badge" id="val-music-volume">50%</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-music-enabled" checked />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+              <input type="range" min="0" max="100" value="50" class="custom-slider" id="slider-music-volume" />
+            </div>
+
+            <!-- 3. Engine & SFX Volume & Toggle -->
+            <div class="setting-card">
+              <div class="setting-title-row">
+                <div class="setting-info">
+                  <strong>ENGINE & SFX SOUND</strong>
+                  <span>V8 interior roar, brakes, nitro & tire scrub</span>
+                </div>
+                <div class="setting-actions">
+                  <span class="vol-badge" id="val-sfx-volume">90%</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-sfx-enabled" checked />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+              <input type="range" min="0" max="100" value="90" class="custom-slider" id="slider-sfx-volume" />
+            </div>
+
+            <!-- 4. Sound Test Action Card -->
+            <div class="setting-card setting-card-action">
+              <div class="setting-info">
+                <strong>CALIBRATE & TEST SOUND</strong>
+                <span>Preview current volume levels with high-fidelity chimes</span>
+              </div>
+              <button id="btn-test-sound" class="test-sound-action-btn">
+                <span>🔊 TEST AUDIO</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content 4: Controls Guide -->
+      <div id="tab-controls" class="tab-pane">
+        <div class="controls-guide-grid">
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>W</kbd> <kbd>&uarr;</kbd></div>
+            <div class="ctrl-desc"><strong>ACCELERATE</strong><span>6-Speed realistic V8 power curve</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>S</kbd> <kbd>&darr;</kbd></div>
+            <div class="ctrl-desc"><strong>BRAKE / REVERSE</strong><span>Brembo carbon-ceramic brakes (100-0 in 30m)</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>A</kbd> <kbd>D</kbd> / <kbd>&larr;</kbd> <kbd>&rarr;</kbd></div>
+            <div class="ctrl-desc"><strong>STEER</strong><span>Smooth arcade curve tracking with bumper guides</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>SHIFT</kbd></div>
+            <div class="ctrl-desc"><strong>NITROUS BOOST</strong><span>+200 HP power surge to 365 km/h with exhaust flames</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>SPACE</kbd></div>
+            <div class="ctrl-desc"><strong>HANDBRAKE DRIFT</strong><span>Tire screech, drift angle & rapid nitro refill</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>C</kbd></div>
+            <div class="ctrl-desc"><strong>TOGGLE CAMERA</strong><span>Switch between Dynamic Chase and Hood Cockpit view</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>R</kbd></div>
+            <div class="ctrl-desc"><strong>RESET CAR</strong><span>Instantly recover car safely onto current track spline</span></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="key-badge-cluster"><kbd>ESC</kbd></div>
+            <div class="ctrl-desc"><strong>PAUSE / HOME MENU</strong><span>Pause game or return to the main menu at any time</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Primary Action Footer -->
+      <div class="menu-footer-bar">
+        <div class="game-credits-tag">★ PROUDLY CRAFTED & MADE BY RAJAMANI ★</div>
+        <button id="btn-start-selected-level" class="start-race-huge-btn">
+          <span>START SELECTED RACE</span>
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAUSE MODAL -->
+  <div id="pause-modal" class="hidden">
+    <div class="pause-backdrop"></div>
+    <div class="pause-card">
+      <h2 class="pause-header">RACE PAUSED</h2>
+      <div class="pause-level-info" id="pause-level-info">LEVEL 1 // MONZA DAY GP</div>
+      <div class="pause-actions-list">
+        <button id="btn-resume-race" class="pause-btn primary">RESUME RACE</button>
+        <button id="btn-restart-current-race" class="pause-btn">RESTART RACE</button>
+        <button id="btn-pause-return-home" class="pause-btn danger">RETURN TO HOME MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VICTORY / RESULTS MODAL -->
+  <div id="results-modal" class="hidden">
+    <div class="results-backdrop"></div>
+    <div class="results-card">
+      <div id="results-trophy" class="results-trophy">🏆</div>
+      <h2 id="results-header">1ST PLACE VICTORY!</h2>
+      <div class="results-stars-row" id="results-stars-row">
+        <span class="star">⭐</span>
+        <span class="star">⭐</span>
+        <span class="star">⭐</span>
+      </div>
+      <div class="results-stats">
+        <div class="res-stat-row">
+          <span>TOTAL RACE TIME:</span>
+          <strong id="res-total-time">01:14.45</strong>
+        </div>
+        <div class="res-stat-row">
+          <span>BEST LAP:</span>
+          <strong id="res-best-lap">00:36.20</strong>
+        </div>
+        <div class="res-stat-row" id="res-unlock-row" style="display: none;">
+          <span style="color: #facc15;">UNLOCKED:</span>
+          <strong id="res-unlock-text" style="color: #facc15;">NEXT LEVEL AVAILABLE!</strong>
+        </div>
+      </div>
+      <div class="results-buttons">
+        <button id="btn-next-level" class="huge-action-btn primary" style="display: none;">NEXT LEVEL ➔</button>
+        <button id="btn-retry-race" class="huge-action-btn">RACE AGAIN</button>
+        <button id="btn-results-home" class="huge-action-btn secondary">HOME MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Entry Script -->
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
