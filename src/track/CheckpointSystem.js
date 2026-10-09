@@ -13,12 +13,14 @@ export class CheckpointSystem {
     // Player State
     this.currentLap = 1;
     this.currentCheckpointIndex = 0;
+    this.maxCheckpointVisited = 0;
     this.lapStartTime = 0;
     this.currentLapTime = 0;
     this.bestLapTime = null;
     this.totalRaceTime = 0;
     this.raceFinished = false;
-    this.maxProgressPct = 0;
+    this.displayedProgress = 0;
+    this.prevSplineT = 0.0;
     this.finalPosition = null;
 
     // Checkpoint Coordinates (12 checkpoints around track)
@@ -30,7 +32,7 @@ export class CheckpointSystem {
         index: i,
         t: t,
         pos: this.trackSpline.getPointAt(t),
-        radius: 20.0
+        radius: 35.0
       });
     }
 
@@ -46,7 +48,9 @@ export class CheckpointSystem {
   setTrackSpline(trackSpline, totalLaps) {
     this.trackSpline = trackSpline;
     if (totalLaps) this.totalLaps = totalLaps;
-    this.maxProgressPct = 0;
+    this.displayedProgress = 0;
+    this.prevSplineT = 0.0;
+    this.maxCheckpointVisited = 0;
     this.finalPosition = null;
     this.checkpoints = [];
     for (let i = 0; i < this.checkpointCount; i++) {
@@ -55,7 +59,7 @@ export class CheckpointSystem {
         index: i,
         t: t,
         pos: this.trackSpline.getPointAt(t),
-        radius: 22.0
+        radius: 35.0
       });
     }
   }
@@ -64,10 +68,12 @@ export class CheckpointSystem {
     this.lapStartTime = performance.now();
     this.currentLap = 1;
     this.currentCheckpointIndex = 0;
+    this.maxCheckpointVisited = 0;
     this.currentLapTime = 0;
     this.totalRaceTime = 0;
     this.raceFinished = false;
-    this.maxProgressPct = 0;
+    this.displayedProgress = 0;
+    this.prevSplineT = 0.0;
     this.finalPosition = null;
   }
 
@@ -90,33 +96,39 @@ export class CheckpointSystem {
     this.currentLapTime = (now - this.lapStartTime) * 0.001;
     this.totalRaceTime += delta;
 
-    // Checkpoint proximity
+    // Determine current spline progress coordinate t (0.0 to 1.0)
+    let currentSplineT = 0;
+    if (trackBuilder && trackBuilder.getClosestTrackInfo) {
+      const trackInfo = trackBuilder.getClosestTrackInfo(playerPos);
+      currentSplineT = trackInfo.index / trackBuilder.sampleCount;
+    } else {
+      currentSplineT = this.currentCheckpointIndex / this.checkpointCount;
+    }
+    currentSplineT = Math.min(1.0, Math.max(0.0, currentSplineT));
+
+    // Checkpoint proximity tracking
     const nextCpIndex = (this.currentCheckpointIndex + 1) % this.checkpointCount;
     const nextCp = this.checkpoints[nextCpIndex];
-
-    const distToNext = playerPos.distanceTo(nextCp.pos);
-    if (distToNext < nextCp.radius) {
-      this.currentCheckpointIndex = nextCpIndex;
-
-      // Completed a full lap when hitting checkpoint 0 again
-      if (nextCpIndex === 0) {
-        this._completeLap();
+    if (nextCp) {
+      const distToNext = playerPos.distanceTo(nextCp.pos);
+      if (distToNext < nextCp.radius) {
+        this.currentCheckpointIndex = nextCpIndex;
+        this.maxCheckpointVisited = Math.max(this.maxCheckpointVisited, nextCpIndex);
       }
     }
 
-    // Continuous Progress % within the current lap (0 - 100)
-    let lapProgressPct = 0;
-    if (trackBuilder && trackBuilder.getTrackProgressPct) {
-      lapProgressPct = trackBuilder.getTrackProgressPct(playerPos);
-    } else {
-      lapProgressPct = Math.round((this.currentCheckpointIndex / this.checkpointCount) * 100);
+    // Detect actual finish line crossing (spline coordinates wrapping forward from > 0.70 to < 0.25)
+    const passedMajorityOfTrack = this.maxCheckpointVisited >= Math.floor(this.checkpointCount * 0.5);
+    const crossedFinishLine = this.prevSplineT > 0.70 && currentSplineT < 0.25 && passedMajorityOfTrack;
+
+    if (crossedFinishLine) {
+      this._completeLap();
     }
-    lapProgressPct = Math.min(100, Math.max(0, lapProgressPct));
+    this.prevSplineT = currentSplineT;
 
     // Player progress across the whole race (measured in total laps completed + fraction)
     const lapsCompleted = Math.max(0, this.currentLap - 1);
-    const lapFraction = lapProgressPct / 100;
-    const playerProgress = this.raceFinished ? this.totalLaps : (lapsCompleted + lapFraction);
+    const playerProgress = this.raceFinished ? this.totalLaps : (lapsCompleted + currentSplineT);
 
     // Compute Race Position (1 or 2)
     let position = 1;
@@ -130,16 +142,15 @@ export class CheckpointSystem {
       this.finalPosition = position;
     }
 
-    // Full race progress (0% to 100% across the complete game)
-    let totalProgressPct = 0;
+    // Continuous full-race progress percentage (0% to 100%)
+    let currentProgressPct = 0;
     if (this.raceFinished) {
-      totalProgressPct = 100;
-      this.maxProgressPct = 100;
+      currentProgressPct = 100;
+      this.displayedProgress = 100;
     } else {
-      const overallRatio = (lapsCompleted + lapFraction) / Math.max(1, this.totalLaps);
-      const computedPct = Math.min(99, Math.max(0, Math.round(overallRatio * 100)));
-      this.maxProgressPct = Math.max(this.maxProgressPct || 0, computedPct);
-      totalProgressPct = this.maxProgressPct;
+      const overallRatio = (lapsCompleted + currentSplineT) / Math.max(1, this.totalLaps);
+      currentProgressPct = Math.min(99, Math.max(0, Math.round(overallRatio * 100)));
+      this.displayedProgress = Math.max(this.displayedProgress || 0, currentProgressPct);
     }
 
     // Render Minimap
@@ -149,7 +160,7 @@ export class CheckpointSystem {
       currentLap: this.currentLap,
       totalLaps: this.totalLaps,
       position,
-      progressPct: totalProgressPct,
+      progressPct: this.displayedProgress,
       timerText: this.formatTime(this.totalRaceTime),
       currentLapTime: this.formatTime(this.currentLapTime),
       bestLapTime: this.bestLapTime ? this.formatTime(this.bestLapTime) : '--:--.--',
@@ -165,8 +176,11 @@ export class CheckpointSystem {
     if (this.currentLap < this.totalLaps) {
       this.currentLap++;
       this.lapStartTime = performance.now();
+      this.currentCheckpointIndex = 0;
+      this.maxCheckpointVisited = 0;
     } else {
       this.raceFinished = true;
+      this.displayedProgress = 100;
     }
   }
 
