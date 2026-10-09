@@ -1,7 +1,15 @@
 # 🏎️ APEX VELOCITY: OVERDRIVE
 ### High-Octane 3D Arcade-Sim Racing Game Built from Scratch with Three.js
+**Created & Developed by RajaMani**
 
-A browser-first 3D racing game featuring high-gloss supercars, dynamic race circuits, intelligent AI rivals, drift mechanics, nitrous boost, and high-energy Web Audio synthesis.
+[![Play Live on Vercel](https://img.shields.io/badge/PLAY_LIVE-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://apex-velocity-overdrive.vercel.app/)
+[![Three.js](https://img.shields.io/badge/Three.js-r128-black?style=for-the-badge&logo=three.js)](https://threejs.org/)
+[![Vite](https://img.shields.io/badge/Vite-Bundler-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
+
+---
+
+### 🌐 🎮 **[PLAY LIVE ONLINE: https://apex-velocity-overdrive.vercel.app/](https://apex-velocity-overdrive.vercel.app/)**
+> Click above to launch and play directly in your web browser with 0 installation!
 
 ---
 
@@ -59,9 +67,14 @@ A browser-first 3D racing game featuring high-gloss supercars, dynamic race circ
 
 ---
 
-## 🚀 Running the Game
-
+## 🚀 How to Play
+ 
+### 🌐 Play Live Online (Instant in Browser)
+👉 **[https://apex-velocity-overdrive.vercel.app/](https://apex-velocity-overdrive.vercel.app/)**
+ 
+### 💻 Run Locally
 ```bash
+npm install
 npm run dev
 # or
 npx vite --port 3000 --host

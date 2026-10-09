@@ -18,6 +18,8 @@ export class CheckpointSystem {
     this.bestLapTime = null;
     this.totalRaceTime = 0;
     this.raceFinished = false;
+    this.maxProgressPct = 0;
+    this.finalPosition = null;
 
     // Checkpoint Coordinates (12 checkpoints around track)
     this.checkpointCount = 12;
@@ -44,6 +46,8 @@ export class CheckpointSystem {
   setTrackSpline(trackSpline, totalLaps) {
     this.trackSpline = trackSpline;
     if (totalLaps) this.totalLaps = totalLaps;
+    this.maxProgressPct = 0;
+    this.finalPosition = null;
     this.checkpoints = [];
     for (let i = 0; i < this.checkpointCount; i++) {
       const t = i / this.checkpointCount;
@@ -63,23 +67,28 @@ export class CheckpointSystem {
     this.currentLapTime = 0;
     this.totalRaceTime = 0;
     this.raceFinished = false;
+    this.maxProgressPct = 0;
+    this.finalPosition = null;
   }
 
   update(delta, playerPos, playerPhysics, aiRacers, trackBuilder = null) {
-    if (this.raceFinished) return null;
+    if (this.raceFinished) {
+      return {
+        currentLap: this.totalLaps,
+        totalLaps: this.totalLaps,
+        position: this.finalPosition || 1,
+        progressPct: 100,
+        timerText: this.formatTime(this.totalRaceTime),
+        currentLapTime: this.formatTime(this.currentLapTime),
+        bestLapTime: this.bestLapTime ? this.formatTime(this.bestLapTime) : '--:--.--',
+        raceFinished: true
+      };
+    }
 
     // Update timers
     const now = performance.now();
     this.currentLapTime = (now - this.lapStartTime) * 0.001;
     this.totalRaceTime += delta;
-
-    // Continuous Progress %
-    let progressPct = 0;
-    if (trackBuilder && trackBuilder.getTrackProgressPct) {
-      progressPct = trackBuilder.getTrackProgressPct(playerPos);
-    } else {
-      progressPct = Math.round((this.currentCheckpointIndex / this.checkpointCount) * 100);
-    }
 
     // Checkpoint proximity
     const nextCpIndex = (this.currentCheckpointIndex + 1) % this.checkpointCount;
@@ -95,15 +104,43 @@ export class CheckpointSystem {
       }
     }
 
-    // Compute Race Position (1 or 2)
-    const playerProgress = (this.currentLap - 1) + (progressPct / 100);
-    let position = 1;
+    // Continuous Progress % within the current lap (0 - 100)
+    let lapProgressPct = 0;
+    if (trackBuilder && trackBuilder.getTrackProgressPct) {
+      lapProgressPct = trackBuilder.getTrackProgressPct(playerPos);
+    } else {
+      lapProgressPct = Math.round((this.currentCheckpointIndex / this.checkpointCount) * 100);
+    }
+    lapProgressPct = Math.min(100, Math.max(0, lapProgressPct));
 
+    // Player progress across the whole race (measured in total laps completed + fraction)
+    const lapsCompleted = Math.max(0, this.currentLap - 1);
+    const lapFraction = lapProgressPct / 100;
+    const playerProgress = this.raceFinished ? this.totalLaps : (lapsCompleted + lapFraction);
+
+    // Compute Race Position (1 or 2)
+    let position = 1;
     aiRacers.forEach(ai => {
       if (ai.getProgress() > playerProgress) {
         position++;
       }
     });
+
+    if (this.raceFinished) {
+      this.finalPosition = position;
+    }
+
+    // Full race progress (0% to 100% across the complete game)
+    let totalProgressPct = 0;
+    if (this.raceFinished) {
+      totalProgressPct = 100;
+      this.maxProgressPct = 100;
+    } else {
+      const overallRatio = (lapsCompleted + lapFraction) / Math.max(1, this.totalLaps);
+      const computedPct = Math.min(99, Math.max(0, Math.round(overallRatio * 100)));
+      this.maxProgressPct = Math.max(this.maxProgressPct || 0, computedPct);
+      totalProgressPct = this.maxProgressPct;
+    }
 
     // Render Minimap
     this._renderMinimap(playerPos, playerPhysics.rotationY, aiRacers);
@@ -112,7 +149,7 @@ export class CheckpointSystem {
       currentLap: this.currentLap,
       totalLaps: this.totalLaps,
       position,
-      progressPct,
+      progressPct: totalProgressPct,
       timerText: this.formatTime(this.totalRaceTime),
       currentLapTime: this.formatTime(this.currentLapTime),
       bestLapTime: this.bestLapTime ? this.formatTime(this.bestLapTime) : '--:--.--',
