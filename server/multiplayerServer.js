@@ -196,6 +196,9 @@ export function handleMultiplayerUpgrade(req, socket, head) {
         rooms.delete(room.id);
         console.log(`[Multiplayer] Room ${room.id} deleted (empty)`);
       } else {
+        if (room.players.size <= 1) {
+          room.state = 'LOBBY';
+        }
         broadcastToRoom(room, {
           type: 'PLAYER_LEFT',
           playerId,
@@ -216,6 +219,31 @@ export function handleMultiplayerUpgrade(req, socket, head) {
         const roomId = (msg.roomId || 'BHARAT-101').toUpperCase().trim();
         const room = getOrCreateRoom(roomId);
 
+        // Guard: check if race is already active in this room
+        if (room.state === 'RACING') {
+          sendToSelf({
+            type: 'JOIN_FAILED',
+            reason: `Race is currently in progress in Room ${roomId}. Please wait or join a different room.`
+          });
+          break;
+        }
+
+        // Clean out any dead sockets from this room before checking capacity and host
+        for (const [pid, p] of room.players.entries()) {
+          if (!p.socket || p.socket.destroyed || p.socket.writableEnded) {
+            room.players.delete(pid);
+          }
+        }
+
+        // Guard: room capacity (maximum 4 players)
+        if (!room.players.has(playerId) && room.players.size >= 4) {
+          sendToSelf({
+            type: 'JOIN_FAILED',
+            reason: `Room ${roomId} is full (maximum 4 racers per party).`
+          });
+          break;
+        }
+
         // If client was already in a different room, clean up previous membership
         if (currentRoom && currentRoom !== room && currentRoom.players.has(playerId)) {
           currentRoom.players.delete(playerId);
@@ -235,13 +263,6 @@ export function handleMultiplayerUpgrade(req, socket, head) {
         }
 
         currentRoom = room;
-
-        // Clean out any dead sockets from this room before checking host
-        for (const [pid, p] of room.players.entries()) {
-          if (!p.socket || p.socket.destroyed || p.socket.writableEnded) {
-            room.players.delete(pid);
-          }
-        }
 
         // Determine host status reliably:
         // Host if: previously host, OR room has no host, OR host is not in room, OR only player in room
@@ -494,6 +515,12 @@ export function handleMultiplayerUpgrade(req, socket, head) {
         broadcastToRoom(currentRoom, {
           type: 'RETURNED_TO_LOBBY'
         });
+        break;
+      }
+
+      case 'LEAVE_ROOM': {
+        cleanupClient();
+        sendToSelf({ type: 'LEFT_ROOM' });
         break;
       }
     }

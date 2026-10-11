@@ -179,13 +179,13 @@
       <!-- Tab Content: Multiplayer Lobby & Rooms -->
       <div id="tab-multiplayer" class="tab-pane">
         <div class="mp-container">
-          <!-- Server Connection Pill -->
+          <!-- Server Connection Bar -->
           <div class="mp-server-bar">
             <div class="mp-status-pill">
               <span id="mp-status-dot" class="status-dot"></span>
-              <span id="mp-status-label">CONNECTING TO LOCALHOST...</span>
+              <span id="mp-status-label">CONNECTING TO SERVER...</span>
             </div>
-            <div class="mp-info-pill">💡 Open another tab on <strong>localhost:3000</strong> to race with 2 players!</div>
+            <div class="mp-party-pill">🎮 Enter a Party Code below or share with friends to race together!</div>
           </div>
 
           <div class="mp-columns-grid">
@@ -205,10 +205,14 @@
               </div>
 
               <div class="mp-field-group">
-                <label>ROOM CODE</label>
+                <div class="mp-label-row">
+                  <label>PARTY ROOM CODE</label>
+                  <button id="btn-mp-random" class="mp-link-btn" title="Generate random room code" type="button">🎲 Random</button>
+                </div>
                 <div class="mp-room-join-row">
-                  <input type="text" id="mp-input-room" maxlength="12" value="BHARAT-101" class="mp-input room-code" />
-                  <button id="btn-mp-join" class="mp-btn primary">JOIN / CREATE</button>
+                  <input type="text" id="mp-input-room" maxlength="12" value="BHARAT-101" class="mp-input room-code" placeholder="ROOM CODE..." />
+                  <button id="btn-mp-join" class="mp-btn primary" type="button">JOIN / CREATE</button>
+                  <button id="btn-mp-share" class="mp-btn secondary" title="Copy room invite link" type="button">📋 Share</button>
                 </div>
               </div>
 
@@ -277,7 +281,10 @@
 
               <div id="mp-client-waiting" class="mp-client-waiting hidden">
                 <div class="mp-waiting-pulse"></div>
-                <span>WAITING FOR HOST TO LAUNCH RACE...</span>
+                <div class="mp-waiting-text-col">
+                  <span>WAITING FOR HOST TO LAUNCH RACE...</span>
+                  <small id="mp-client-track-info" class="mp-client-track-info">Circuit: 1. BUDDH GP (2 Laps)</small>
+                </div>
               </div>
             </div>
           </div>
@@ -499,6 +506,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Floating HUD Toast for Multiplayer Party Alerts -->
+  <div id="mp-toast" class="mp-toast hidden"></div>
 
   <!-- Main Entry Script -->
   <script type="module" src="./src/main.js"></script>

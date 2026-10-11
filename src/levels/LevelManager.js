@@ -119,8 +119,8 @@ export class LevelManager {
     return this.getLevel(this.currentLevelId);
   }
 
-  setLevel(id) {
-    if (this.isLevelUnlocked(id)) {
+  setLevel(id, force = false) {
+    if (force || this.isLevelUnlocked(id)) {
       this.currentLevelId = id;
       return true;
     }

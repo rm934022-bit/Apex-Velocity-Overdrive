@@ -71,9 +71,24 @@ export class UIManager {
     this.btnMpLaunchRace = document.getElementById('btn-mp-launch-race');
     this.mpLiveLeaderboard = document.getElementById('mp-live-leaderboard');
     this.mpBoardList = document.getElementById('mp-board-list');
+    this.btnMpRandom = document.getElementById('btn-mp-random');
+    this.btnMpShare = document.getElementById('btn-mp-share');
+    this.mpClientTrackInfo = document.getElementById('mp-client-track-info');
+    this.mpToast = document.getElementById('mp-toast');
+    this.toastTimeout = null;
 
     this._initHomeMenu();
     this._bindInteractiveControls();
+  }
+
+  showToast(msg, duration = 3000) {
+    if (!this.mpToast) return;
+    this.mpToast.textContent = msg;
+    this.mpToast.classList.remove('hidden');
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
+    this.toastTimeout = setTimeout(() => {
+      if (this.mpToast) this.mpToast.classList.add('hidden');
+    }, duration);
   }
 
   showWaitingForOthers(show = true, finishedCount = 1, totalCount = 2) {
@@ -164,11 +179,11 @@ export class UIManager {
         const targetPane = document.getElementById(targetId);
         if (targetPane) targetPane.classList.add('active');
 
-        // Connect/join multiplayer lobby only when navigating to multiplayer tab
+        // Connect/join multiplayer lobby when navigating to multiplayer tab
         if (targetId === 'tab-multiplayer' && this.multiplayerManager) {
-          if (this.multiplayerManager.isConnected && !this.multiplayerManager.room) {
-            const name = this.mpInputName?.value || 'Racer 1';
-            const room = this.mpInputRoom?.value || 'BHARAT-101';
+          if (!this.multiplayerManager.room) {
+            const name = (this.mpInputName?.value || 'Racer 1').trim();
+            const room = (this.mpInputRoom?.value || 'BHARAT-101').toUpperCase().trim();
             this.multiplayerManager.joinRoom(room, name, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
           }
         }
@@ -645,6 +660,13 @@ export class UIManager {
     this.multiplayerManager = mpManager;
     if (!mpManager) return;
 
+    // Check for room invite code in URL (?room=CODE or ?party=CODE)
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryRoom = urlParams.get('room') || urlParams.get('party');
+    if (queryRoom && this.mpInputRoom) {
+      this.mpInputRoom.value = queryRoom.toUpperCase().trim();
+    }
+
     // Load saved driver name - use sessionStorage for tab-distinct names on same browser
     let savedName = sessionStorage.getItem('apex_racer_name');
     if (!savedName) {
@@ -657,6 +679,14 @@ export class UIManager {
       mpManager.playerName = savedName;
     }
 
+    // Sync initial connection state immediately
+    if (this.mpStatusDot) {
+      this.mpStatusDot.className = `status-dot ${mpManager.isConnected ? 'online' : 'offline'}`;
+    }
+    if (this.mpStatusLabel) {
+      this.mpStatusLabel.textContent = mpManager.isConnected ? 'ONLINE - SERVER CONNECTED' : 'CONNECTING TO SERVER...';
+    }
+
     // Set callbacks from multiplayer manager
     mpManager.setCallbacks({
       onConnectChange: (connected) => {
@@ -664,11 +694,22 @@ export class UIManager {
           this.mpStatusDot.className = `status-dot ${connected ? 'online' : 'offline'}`;
         }
         if (this.mpStatusLabel) {
-          this.mpStatusLabel.textContent = connected ? 'CONNECTED TO LOCALHOST' : 'DISCONNECTED - RETRYING...';
+          this.mpStatusLabel.textContent = connected ? 'ONLINE - SERVER CONNECTED' : 'DISCONNECTED - RECONNECTING...';
+        }
+        // Auto-join room if user is currently viewing the multiplayer tab and not in room
+        const mpPane = document.getElementById('tab-multiplayer');
+        if (connected && mpPane && mpPane.classList.contains('active') && !mpManager.room) {
+          const roomId = (this.mpInputRoom?.value || 'BHARAT-101').toUpperCase().trim();
+          const name = (this.mpInputName?.value || 'Racer').trim();
+          mpManager.joinRoom(roomId, name, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
         }
       },
       onJoined: (data) => {
         this._updateLobbyUI(data.room, data.playerId);
+        this.showToast(`✅ Connected to Party Room ${data.room.id}!`);
+      },
+      onJoinFailed: (reason) => {
+        this.showToast(`⚠️ ${reason}`);
       },
       onRoomStateChange: (room) => {
         this._updateLobbyUI(room, mpManager.playerId);
@@ -676,32 +717,93 @@ export class UIManager {
       onPlayerJoined: (player) => {
         this.playUiClick();
         if (mpManager.room) this._updateLobbyUI(mpManager.room, mpManager.playerId);
+        this.showToast(`🏎️ ${player.name} joined the party!`);
       },
       onPlayerLeft: (playerId) => {
         if (mpManager.room) this._updateLobbyUI(mpManager.room, mpManager.playerId);
+        this.showToast('👋 A racer left the party.');
       },
       onLevelSelected: (levelId, laps) => {
         if (this.mpSelectCircuit) this.mpSelectCircuit.value = levelId;
         if (this.mpSelectLaps) this.mpSelectLaps.value = laps;
+        if (mpManager.room) {
+          mpManager.room.levelId = levelId;
+          mpManager.room.laps = laps;
+          this._updateLobbyUI(mpManager.room, mpManager.playerId);
+        }
       }
     });
 
-    // Driver name change
+    // Driver name change (supports typing and Enter key)
     if (this.mpInputName) {
-      this.mpInputName.addEventListener('change', () => {
+      const onNameUpdate = () => {
         const val = this.mpInputName.value.trim() || 'Racer';
         sessionStorage.setItem('apex_racer_name', val);
         mpManager.updateProfile(val);
+      };
+      this.mpInputName.addEventListener('change', onNameUpdate);
+      this.mpInputName.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onNameUpdate();
+          if (this.btnMpJoin) this.btnMpJoin.click();
+        }
       });
     }
 
-    // Join room button
+    // Join room button & Enter key on room code
     if (this.btnMpJoin) {
       this.btnMpJoin.addEventListener('click', () => {
         this.playUiClick();
-        const roomId = this.mpInputRoom?.value || 'BHARAT-101';
-        const name = this.mpInputName?.value || 'Racer';
+        const roomId = (this.mpInputRoom?.value || 'BHARAT-101').toUpperCase().trim();
+        const name = (this.mpInputName?.value || 'Racer').trim();
+        if (this.mpInputRoom) this.mpInputRoom.value = roomId;
+        sessionStorage.setItem('apex_racer_name', name);
+        this.showToast(`Joining Party Room ${roomId}...`);
         mpManager.joinRoom(roomId, name, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
+      });
+    }
+
+    if (this.mpInputRoom) {
+      this.mpInputRoom.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (this.btnMpJoin) this.btnMpJoin.click();
+        }
+      });
+    }
+
+    // Random Party Code button
+    if (this.btnMpRandom) {
+      this.btnMpRandom.addEventListener('click', () => {
+        this.playUiClick();
+        const prefixes = ['APEX', 'SPEED', 'TURBO', 'NITRO', 'DRIFT', 'VIPER', 'BHARAT'];
+        const num = Math.floor(10 + Math.random() * 90);
+        const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+        const newCode = `${prefix}-${num}`;
+        if (this.mpInputRoom) this.mpInputRoom.value = newCode;
+        const name = (this.mpInputName?.value || 'Racer').trim();
+        this.showToast(`Created Party Code: ${newCode}`);
+        mpManager.joinRoom(newCode, name, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
+      });
+    }
+
+    // Share Party Link / Copy Code button
+    if (this.btnMpShare) {
+      this.btnMpShare.addEventListener('click', async () => {
+        this.playUiClick();
+        const activeRoom = mpManager.room?.id || (this.mpInputRoom?.value || 'BHARAT-101').toUpperCase().trim();
+        const shareUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(activeRoom)}`;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(shareUrl);
+            this.showToast(`📋 Party Invite Link Copied: ${activeRoom}`);
+          } else {
+            prompt('Copy this Party Invite Link:', shareUrl);
+          }
+        } catch (e) {
+          prompt('Copy this Party Invite Link:', shareUrl);
+        }
       });
     }
 
@@ -746,12 +848,27 @@ export class UIManager {
   }
 
   _updateLobbyUI(room, localPlayerId) {
-    if (!room) return;
+    if (!room) {
+      if (this.mpRoomTitle) this.mpRoomTitle.textContent = '---';
+      if (this.mpPlayersCount) this.mpPlayersCount.textContent = '0/4';
+      if (this.mpHostBadge) {
+        this.mpHostBadge.textContent = 'NOT IN ROOM';
+        this.mpHostBadge.style.background = '#64748b';
+        this.mpHostBadge.style.color = '#fff';
+      }
+      if (this.mpHostControls) this.mpHostControls.style.display = 'none';
+      if (this.mpClientWaiting) this.mpClientWaiting.classList.add('hidden');
+      if (this.mpPlayersList) {
+        this.mpPlayersList.innerHTML = '<div style="color: #64748b; font-size: 0.85rem; padding: 18px; text-align: center;">Enter a party room code above and click JOIN / CREATE</div>';
+      }
+      return;
+    }
 
     if (this.mpRoomTitle) this.mpRoomTitle.textContent = room.id;
+    if (this.mpInputRoom) this.mpInputRoom.value = room.id;
     if (this.mpPlayersCount) this.mpPlayersCount.textContent = `${room.players.length}/4`;
 
-    const isHost = (room.hostId === localPlayerId) || !!this.multiplayerManager?.isHost;
+    const isHost = (room.hostId === localPlayerId);
     if (this.mpHostBadge) {
       this.mpHostBadge.textContent = isHost ? '👑 HOST' : 'RACER';
       this.mpHostBadge.style.background = isHost ? '#00f0ff' : '#94a3b8';
@@ -766,6 +883,26 @@ export class UIManager {
       this.mpClientWaiting.classList.toggle('hidden', isHost);
     }
 
+    // Update track preview in waiting banner
+    const levelNames = {
+      1: 'BUDDH GP',
+      2: 'THAR DESERT',
+      3: 'GOA COAST',
+      4: 'MUMBAI SEA LINK',
+      5: 'HIMALAYAN PASS'
+    };
+    if (this.mpClientTrackInfo) {
+      const trackName = levelNames[room.levelId || 1] || `Circuit ${room.levelId || 1}`;
+      this.mpClientTrackInfo.textContent = `Circuit: ${trackName} (${room.laps || 2} Laps)`;
+    }
+
+    if (this.mpSelectCircuit && isHost) {
+      this.mpSelectCircuit.value = room.levelId || 1;
+    }
+    if (this.mpSelectLaps && isHost) {
+      this.mpSelectLaps.value = room.laps || 2;
+    }
+
     // Render racers in lobby
     if (this.mpPlayersList) {
       this.mpPlayersList.innerHTML = '';
@@ -774,7 +911,7 @@ export class UIManager {
         const isSelf = p.id === localPlayerId;
         row.className = `mp-player-row ${isSelf ? 'is-self' : ''}`;
 
-        const hexColor = '#' + (p.color || 0x00f0ff).toString(16).padStart(6, '0');
+        const hexColor = '#' + (p.color !== undefined ? p.color : 0x00f0ff).toString(16).padStart(6, '0');
         row.innerHTML = `
           <div class="mp-player-info">
             <span class="mp-slot-pill ${p.slot === 1 ? 'p1' : 'p2'}">P${p.slot}</span>

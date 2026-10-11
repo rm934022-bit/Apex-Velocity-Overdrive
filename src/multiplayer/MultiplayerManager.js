@@ -1,6 +1,6 @@
 /**
  * Apex Velocity: Overdrive
- * Real-Time Multiplayer Manager (LAN & Localhost)
+ * Real-Time Multiplayer Manager
  * Handles WebSocket communications, room lobby synchronization,
  * remote 3D supercar rendering, vehicle state interpolation,
  * floating player nametags, and synchronized GTA 5 race starts.
@@ -33,10 +33,16 @@ export class MultiplayerManager {
     this.broadcastTimer = 0;
     this.broadcastInterval = 1 / 30;
 
+    // Desired Room & Pending Messages Queue
+    this.desiredRoom = null;
+    this.pendingMessages = [];
+    this.reconnectTimeout = null;
+
     // UI Event Callbacks
     this.callbacks = {
       onConnectChange: null,
       onJoined: null,
+      onJoinFailed: null,
       onRoomStateChange: null,
       onPlayerJoined: null,
       onPlayerLeft: null,
@@ -46,7 +52,7 @@ export class MultiplayerManager {
       onAllPlayersFinished: null
     };
 
-    // Auto-connect to local server on instantiation
+    // Auto-connect to server on instantiation
     this.connect();
   }
 
@@ -59,61 +65,120 @@ export class MultiplayerManager {
       return;
     }
 
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
     // Try same-host Vite plugin port first, fallback to standalone port 3001
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const primaryUrl = `${protocol}//${window.location.host}/multiplayer`;
+    const fallbackUrl = `${protocol}//${window.location.hostname || '127.0.0.1'}:3001`;
 
-    this._attemptConnection(primaryUrl, () => {
-      // Fallback port 3001 if primary fails
-      const fallbackUrl = `ws://${window.location.hostname || 'localhost'}:3001`;
-      this._attemptConnection(fallbackUrl);
+    this._connectWithCandidate(primaryUrl, () => {
+      // If primary fails (e.g. standalone server running on 3001), try fallback
+      this._connectWithCandidate(fallbackUrl, () => {
+        console.warn('[Multiplayer] Connection to server failed. Retrying in 3s...');
+        this._scheduleReconnect(3000);
+      });
     });
   }
 
-  _attemptConnection(url, onFail = null) {
+  _connectWithCandidate(url, onFail = null) {
+    let resolved = false;
+    let ws;
     try {
-      const ws = new WebSocket(url);
-
-      ws.onopen = () => {
-        this.ws = ws;
-        this.isConnected = true;
-        console.log(`[Multiplayer] Connected to server at ${url}`);
-        if (this.callbacks.onConnectChange) this.callbacks.onConnectChange(true);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          this._handleServerMessage(data);
-        } catch (err) {
-          console.error('[Multiplayer] Failed to parse incoming packet:', err);
-        }
-      };
-
-      ws.onerror = () => {
-        if (!this.isConnected && onFail) {
-          onFail();
-        }
-      };
-
-      ws.onclose = () => {
-        const wasConnected = this.isConnected;
-        this.isConnected = false;
-        this.ws = null;
-        if (wasConnected) {
-          console.log('[Multiplayer] Disconnected from server. Reconnecting in 3s...');
-          if (this.callbacks.onConnectChange) this.callbacks.onConnectChange(false);
-          setTimeout(() => this.connect(), 3000);
-        }
-      };
+      ws = new WebSocket(url);
     } catch (err) {
       if (onFail) onFail();
+      return;
     }
+
+    // 2.5s connection timeout to failover quickly if endpoint is silent
+    const timer = setTimeout(() => {
+      if (!resolved && ws.readyState !== WebSocket.OPEN) {
+        resolved = true;
+        try { ws.close(); } catch (e) {}
+        if (onFail) onFail();
+      }
+    }, 2500);
+
+    ws.onopen = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+
+      this.ws = ws;
+      this.isConnected = true;
+      console.log(`[Multiplayer] Connected to server at ${url}`);
+
+      if (this.callbacks.onConnectChange) {
+        this.callbacks.onConnectChange(true);
+      }
+
+      // Flush any queued join/room messages
+      while (this.pendingMessages.length > 0) {
+        const msg = this.pendingMessages.shift();
+        this.send(msg);
+      }
+
+      // Automatically rejoin desired room if player was previously in one
+      if (this.desiredRoom) {
+        this.joinRoom(this.desiredRoom, this.playerName, this.selectedCarModel, this.selectedColor);
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this._handleServerMessage(data);
+      } catch (err) {
+        console.error('[Multiplayer] Failed to parse incoming packet:', err);
+      }
+    };
+
+    ws.onerror = () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        if (onFail) onFail();
+      }
+    };
+
+    ws.onclose = () => {
+      if (this.ws === ws) {
+        this.ws = null;
+        this.isConnected = false;
+        console.log('[Multiplayer] Disconnected from server. Reconnecting in 3s...');
+        if (this.callbacks.onConnectChange) {
+          this.callbacks.onConnectChange(false);
+        }
+        this._scheduleReconnect(3000);
+      }
+    };
+  }
+
+  _scheduleReconnect(delay = 3000) {
+    if (this.reconnectTimeout) return;
+    this.reconnectTimeout = setTimeout(() => {
+      this.reconnectTimeout = null;
+      this.connect();
+    }, delay);
   }
 
   send(data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
+      return;
+    }
+
+    // Queue room joining and lobby messages until socket connects
+    if (data.type === 'JOIN_ROOM' || data.type === 'SELECT_LEVEL' || data.type === 'START_RACE') {
+      this.pendingMessages.push(data);
+    }
+
+    if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+      this.connect();
     }
   }
 
@@ -122,9 +187,12 @@ export class MultiplayerManager {
     if (carModel) this.selectedCarModel = carModel;
     if (color !== undefined) this.selectedColor = color;
 
+    const normalizedRoomId = (roomId || 'BHARAT-101').toUpperCase().trim();
+    this.desiredRoom = normalizedRoomId;
+
     this.send({
       type: 'JOIN_ROOM',
-      roomId: (roomId || 'BHARAT-LOBBY').toUpperCase().trim(),
+      roomId: normalizedRoomId,
       name: this.playerName,
       carModel: this.selectedCarModel,
       color: this.selectedColor
@@ -194,6 +262,7 @@ export class MultiplayerManager {
   leaveRoom() {
     this.clearRemoteRacers();
     this.room = null;
+    this.desiredRoom = null;
     this.isHost = false;
     this.slot = 1;
     this.send({ type: 'LEAVE_ROOM' });
@@ -212,8 +281,26 @@ export class MultiplayerManager {
         this.slot = msg.slot;
         this.isHost = msg.isHost;
         this.room = msg.room;
+        this.desiredRoom = msg.room.id;
+        this.clearRemoteRacers();
         if (this.callbacks.onJoined) this.callbacks.onJoined(msg);
         if (this.callbacks.onRoomStateChange) this.callbacks.onRoomStateChange(this.room);
+        break;
+
+      case 'JOIN_FAILED':
+        console.warn('[Multiplayer] Join failed:', msg.reason);
+        if (this.callbacks.onJoinFailed) {
+          this.callbacks.onJoinFailed(msg.reason);
+        } else {
+          alert(msg.reason);
+        }
+        break;
+
+      case 'LEFT_ROOM':
+        this.room = null;
+        this.desiredRoom = null;
+        this.clearRemoteRacers();
+        if (this.callbacks.onRoomStateChange) this.callbacks.onRoomStateChange(null);
         break;
 
       case 'PLAYER_JOINED':

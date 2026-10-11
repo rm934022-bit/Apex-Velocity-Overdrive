@@ -680,7 +680,7 @@ class RacingGame {
     this.uiManager.showWaitingForOthers(false);
     if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
 
-    this.levelManager.setLevel(config.levelId || 1);
+    this.levelManager.setLevel(config.levelId || 1, true);
     const level = this.levelManager.getCurrentLevel();
     if (config.laps) level.laps = config.laps;
 

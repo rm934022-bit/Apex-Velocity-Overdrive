@@ -1499,9 +1499,12 @@ kbd {
   box-shadow: 0 0 12px #ef4444;
 }
 
-.mp-info-pill {
+.mp-info-pill,
+.mp-party-pill {
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: #38bdf8;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .mp-columns-grid {
@@ -1568,6 +1571,32 @@ kbd {
   letter-spacing: 1px;
 }
 
+.mp-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mp-link-btn {
+  background: transparent;
+  border: none;
+  color: #00f0ff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.mp-link-btn:hover {
+  background: rgba(0, 240, 255, 0.15);
+  color: #fff;
+}
+
 .mp-input {
   background: rgba(2, 6, 23, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1589,13 +1618,15 @@ kbd {
 .mp-room-join-row {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 
 .mp-input.room-code {
   text-transform: uppercase;
   letter-spacing: 2px;
   font-weight: 900;
-  width: 140px;
+  flex: 1;
+  min-width: 110px;
 }
 
 .mp-btn {
@@ -1609,11 +1640,23 @@ kbd {
   cursor: pointer;
   transition: all 0.15s ease;
   font-family: inherit;
+  white-space: nowrap;
 }
 
 .mp-btn:hover {
   background: rgba(255, 255, 255, 0.2);
   transform: translateY(-1px);
+}
+
+.mp-btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #cbd5e1;
+}
+
+.mp-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
 .mp-btn.primary {
@@ -2020,5 +2063,56 @@ kbd {
 .mp-podium-row.is-self {
   border-color: rgba(0, 240, 255, 0.6);
   color: #00f0ff;
+}
+
+.mp-waiting-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mp-client-track-info {
+  color: #38bdf8;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+}
+
+.mp-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid #00f0ff;
+  box-shadow: 0 8px 32px rgba(0, 240, 255, 0.35);
+  color: #ffffff;
+  padding: 12px 24px;
+  border-radius: 30px;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  animation: mpToastFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mp-toast.hidden {
+  display: none;
+}
+
+@keyframes mpToastFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 
