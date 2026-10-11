@@ -664,7 +664,21 @@ export class UIManager {
     const urlParams = new URLSearchParams(window.location.search);
     const queryRoom = urlParams.get('room') || urlParams.get('party');
     if (queryRoom && this.mpInputRoom) {
-      this.mpInputRoom.value = queryRoom.toUpperCase().trim();
+      const roomToJoin = queryRoom.toUpperCase().trim();
+      this.mpInputRoom.value = roomToJoin;
+      
+      // Auto-switch directly to multiplayer tab so player lands in the party room
+      const tabButtons = document.querySelectorAll('.menu-tab-btn');
+      const tabPanes = document.querySelectorAll('.tab-pane');
+      const mpTabBtn = document.querySelector('[data-tab="tab-multiplayer"]');
+      const mpPane = document.getElementById('tab-multiplayer');
+
+      if (mpTabBtn && mpPane) {
+        tabButtons.forEach(b => b.classList.remove('active'));
+        tabPanes.forEach(p => p.classList.remove('active'));
+        mpTabBtn.classList.add('active');
+        mpPane.classList.add('active');
+      }
     }
 
     // Load saved driver name - use sessionStorage for tab-distinct names on same browser
@@ -681,10 +695,17 @@ export class UIManager {
 
     // Sync initial connection state immediately
     if (this.mpStatusDot) {
-      this.mpStatusDot.className = `status-dot ${mpManager.isConnected ? 'online' : 'offline'}`;
+      this.mpStatusDot.className = 'status-dot online';
     }
     if (this.mpStatusLabel) {
-      this.mpStatusLabel.textContent = mpManager.isConnected ? 'ONLINE - SERVER CONNECTED' : 'CONNECTING TO SERVER...';
+      this.mpStatusLabel.textContent = 'ONLINE - PARTY LOBBY READY';
+    }
+
+    // If invited via link, auto-join immediately
+    if (queryRoom) {
+      const roomToJoin = queryRoom.toUpperCase().trim();
+      this.showToast(`Joining Party Room ${roomToJoin}...`);
+      mpManager.joinRoom(roomToJoin, savedName, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
     }
 
     // Set callbacks from multiplayer manager
@@ -694,7 +715,7 @@ export class UIManager {
           this.mpStatusDot.className = `status-dot ${connected ? 'online' : 'offline'}`;
         }
         if (this.mpStatusLabel) {
-          this.mpStatusLabel.textContent = connected ? 'ONLINE - SERVER CONNECTED' : 'DISCONNECTED - RECONNECTING...';
+          this.mpStatusLabel.textContent = connected ? 'ONLINE - PARTY LOBBY READY' : 'CONNECTING TO PARTY NETWORK...';
         }
         // Auto-join room if user is currently viewing the multiplayer tab and not in room
         const mpPane = document.getElementById('tab-multiplayer');
