@@ -106,6 +106,15 @@ export class CheckpointSystem {
     }
     currentSplineT = Math.min(1.0, Math.max(0.0, currentSplineT));
 
+    // Handle starting grid boundary wrap:
+    // Closed track splines wrap from 1.0 to 0.0 at the start line.
+    // Starting grid slots placed behind the start line (e.g. Slot 2, 3, 4) on Lap 1
+    // map to spline sample indices near the end of the circuit (currentSplineT > 0.70).
+    // Clamp to 0.0 until checkpoint 1 is passed so all grid positions start at 0% instead of 50%.
+    if (this.currentLap === 1 && this.maxCheckpointVisited < 2 && currentSplineT > 0.70) {
+      currentSplineT = 0.0;
+    }
+
     // Checkpoint proximity tracking
     const nextCpIndex = (this.currentCheckpointIndex + 1) % this.checkpointCount;
     const nextCp = this.checkpoints[nextCpIndex];

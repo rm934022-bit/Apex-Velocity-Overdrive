@@ -729,8 +729,86 @@ export class SoundEngine {
   }
 
   // ===========================================================================
-  // 9. POLISHED MODERN MINIMALIST UI TONES & CHIMES
+  // 9. POLISHED MODERN MINIMALIST UI TONES & CHIMES + GTA 5 CINEMATICS
   // ===========================================================================
+  playGtaWhoosh() {
+    if (!this.ctx || !this.isSFXEnabled || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const duration = 1.35;
+
+      // Filtered sweeping noise swoosh
+      const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+      const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+
+      const whiteNoise = this.ctx.createBufferSource();
+      whiteNoise.buffer = noiseBuffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1400, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + duration);
+      filter.Q.setValueAtTime(3.8, now);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.65, now + 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      // Pitch-dropping air body
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.exponentialRampToValueAtTime(45, now + duration);
+
+      oscGain.gain.setValueAtTime(0.001, now);
+      oscGain.gain.linearRampToValueAtTime(0.4, now + 0.3);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      whiteNoise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc.connect(oscGain);
+      oscGain.connect(this.sfxGain);
+
+      whiteNoise.start(now);
+      osc.start(now);
+      whiteNoise.stop(now + duration);
+      osc.stop(now + duration);
+    } catch (e) {}
+  }
+
+  playGtaBassDrop() {
+    if (!this.ctx || !this.isSFXEnabled || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const duration = 0.85;
+
+      const subOsc = this.ctx.createOscillator();
+      const subGain = this.ctx.createGain();
+
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(95, now);
+      subOsc.frequency.exponentialRampToValueAtTime(32, now + duration);
+
+      subGain.gain.setValueAtTime(0.001, now);
+      subGain.gain.linearRampToValueAtTime(0.85, now + 0.04);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      subOsc.connect(subGain);
+      subGain.connect(this.sfxGain);
+
+      subOsc.start(now);
+      subOsc.stop(now + duration);
+    } catch (e) {}
+  }
+
   playCountdownBeep(isGo = false) {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;

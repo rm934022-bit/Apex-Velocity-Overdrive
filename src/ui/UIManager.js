@@ -47,8 +47,42 @@ export class UIManager {
     this.speedLines = document.getElementById('speed-lines-vfx');
     this.nitroTunnel = document.getElementById('nitro-tunnel-vfx');
 
+    // Multiplayer DOM Elements
+    this.multiplayerManager = null;
+    this.isLastRaceMultiplayer = false;
+    this.mpWaitingBanner = document.getElementById('mp-waiting-banner');
+    this.mpWaitingCount = document.getElementById('mp-waiting-count');
+    this.resMpStandingsBox = document.getElementById('res-mp-standings-box');
+    this.resMpStandingsList = document.getElementById('res-mp-standings-list');
+    this.mpStatusDot = document.getElementById('mp-status-dot');
+    this.mpStatusLabel = document.getElementById('mp-status-label');
+    this.mpInputName = document.getElementById('mp-input-name');
+    this.mpInputRoom = document.getElementById('mp-input-room');
+    this.btnMpJoin = document.getElementById('btn-mp-join');
+    this.btnStartSplitScreen = document.getElementById('btn-start-splitscreen');
+    this.mpRoomTitle = document.getElementById('mp-room-title');
+    this.mpHostBadge = document.getElementById('mp-host-badge');
+    this.mpPlayersCount = document.getElementById('mp-players-count');
+    this.mpPlayersList = document.getElementById('mp-players-list');
+    this.mpHostControls = document.getElementById('mp-host-controls');
+    this.mpClientWaiting = document.getElementById('mp-client-waiting');
+    this.mpSelectCircuit = document.getElementById('mp-select-circuit');
+    this.mpSelectLaps = document.getElementById('mp-select-laps');
+    this.btnMpLaunchRace = document.getElementById('btn-mp-launch-race');
+    this.mpLiveLeaderboard = document.getElementById('mp-live-leaderboard');
+    this.mpBoardList = document.getElementById('mp-board-list');
+
     this._initHomeMenu();
     this._bindInteractiveControls();
+  }
+
+  showWaitingForOthers(show = true, finishedCount = 1, totalCount = 2) {
+    if (this.mpWaitingBanner) {
+      this.mpWaitingBanner.classList.toggle('hidden', !show);
+      if (this.mpWaitingCount) {
+        this.mpWaitingCount.textContent = `(${finishedCount}/${totalCount})`;
+      }
+    }
   }
 
   _initHomeMenu() {
@@ -129,6 +163,15 @@ export class UIManager {
         btn.classList.add('active');
         const targetPane = document.getElementById(targetId);
         if (targetPane) targetPane.classList.add('active');
+
+        // Connect/join multiplayer lobby only when navigating to multiplayer tab
+        if (targetId === 'tab-multiplayer' && this.multiplayerManager) {
+          if (this.multiplayerManager.isConnected && !this.multiplayerManager.room) {
+            const name = this.mpInputName?.value || 'Racer 1';
+            const room = this.mpInputRoom?.value || 'BHARAT-101';
+            this.multiplayerManager.joinRoom(room, name, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
+          }
+        }
       });
     });
   }
@@ -334,7 +377,13 @@ export class UIManager {
       this.btnRetryRace.addEventListener('click', () => {
         this.playUiClick();
         if (this.resultsModal) this.resultsModal.classList.add('hidden');
-        if (this.actions.onRestartRace) this.actions.onRestartRace();
+        if (this.isLastRaceMultiplayer) {
+          if (this.actions.onRestartMultiplayerRace) {
+            this.actions.onRestartMultiplayerRace();
+          }
+        } else {
+          if (this.actions.onRestartRace) this.actions.onRestartRace();
+        }
       });
     }
 
@@ -342,8 +391,14 @@ export class UIManager {
       this.btnNextLevel.addEventListener('click', () => {
         this.playUiClick();
         if (this.resultsModal) this.resultsModal.classList.add('hidden');
-        const nextLevelId = this.levelManager.currentLevelId + 1;
-        if (this.actions.onStartRace) this.actions.onStartRace(nextLevelId);
+        if (this.isLastRaceMultiplayer) {
+          if (this.actions.onNextMultiplayerRace) {
+            this.actions.onNextMultiplayerRace();
+          }
+        } else {
+          const nextLevelId = this.levelManager.currentLevelId + 1;
+          if (this.actions.onStartRace) this.actions.onStartRace(nextLevelId);
+        }
       });
     }
 
@@ -381,7 +436,7 @@ export class UIManager {
     if (this.pauseModal) this.pauseModal.classList.add('hidden');
   }
 
-  updateHUD(physics, raceData) {
+  updateHUD(physics, raceData, isMultiplayer = false) {
     if (!physics) return;
 
     // 1. Speed
@@ -410,7 +465,18 @@ export class UIManager {
         this.progressEl.textContent = raceData.progressPct ?? 0;
       }
       if (this.posEl) {
-        this.posEl.textContent = raceData.position ?? 1;
+        if (isMultiplayer && this.multiplayerManager?.room && this.multiplayerManager.room.state === 'RACING') {
+          const standings = this.multiplayerManager.getStandings(raceData.progressPct ?? 0);
+          const myIdx = standings.findIndex(s => s.isLocal);
+          this.posEl.textContent = (myIdx >= 0 ? myIdx + 1 : 1);
+          const totalEl = document.getElementById('player-pos-total');
+          if (totalEl) totalEl.textContent = `/${Math.max(2, standings.length)}`;
+        } else {
+          // Pure singleplayer: Player vs AI rival
+          this.posEl.textContent = raceData.position ?? 1;
+          const totalEl = document.getElementById('player-pos-total');
+          if (totalEl) totalEl.textContent = '/2';
+        }
       }
       if (this.lapEl) {
         this.lapEl.textContent = `LAP ${raceData.currentLap || 1}/${raceData.totalLaps || 2}`;
@@ -418,6 +484,11 @@ export class UIManager {
       if (this.timerEl) {
         this.timerEl.textContent = raceData.timerText ?? '0:00.00';
       }
+    }
+
+    // Ensure multiplayer leaderboard card is strictly hidden in singleplayer
+    if (!isMultiplayer) {
+      this.showMultiplayerLeaderboard(false);
     }
 
     // 4. VFX Overlays
@@ -433,6 +504,7 @@ export class UIManager {
 
   showResults(results, levelResult) {
     if (this.resultsModal) this.resultsModal.classList.remove('hidden');
+    this.isLastRaceMultiplayer = !!results.isMultiplayer;
 
     const header = document.getElementById('results-header');
     const trophy = document.getElementById('results-trophy');
@@ -442,46 +514,115 @@ export class UIManager {
     const unlockRow = document.getElementById('res-unlock-row');
     const unlockText = document.getElementById('res-unlock-text');
 
-    if (results.position === 1) {
-      if (trophy) trophy.textContent = '🏆';
-      if (header) header.textContent = '1ST PLACE VICTORY!';
-      if (this.soundEngine) this.soundEngine.playVictoryFanfare();
-    } else {
-      if (trophy) trophy.textContent = '🏁';
-      if (header) header.textContent = `${results.position}${this._getOrdinal(results.position)} PLACE FINISH`;
-    }
-
-    if (starsRow && levelResult) {
-      let stars = '';
-      for (let s = 1; s <= 3; s++) {
-        stars += s <= levelResult.starsEarned ? '⭐' : '☆';
-      }
-      starsRow.textContent = stars;
-    }
-
     if (totalTimeEl) totalTimeEl.textContent = results.totalTime;
     if (bestLapEl) bestLapEl.textContent = results.bestLapTime;
 
-    // Show unlock alert and Next Level button if newly unlocked or available
-    if (levelResult && levelResult.newlyUnlocked) {
-      const nextLvl = this.levelManager.getLevel(levelResult.newlyUnlocked);
-      if (unlockRow) unlockRow.style.display = 'flex';
-      if (unlockText) unlockText.textContent = `UNLOCKED: ${nextLvl.badge} (${nextLvl.title})!`;
+    if (results.isMultiplayer) {
+      // --- MULTIPLAYER RESULTS MODE ---
+      if (starsRow) starsRow.style.display = 'none';
+
+      if (results.position === 1) {
+        if (trophy) trophy.textContent = '🏆';
+        if (header) header.textContent = '1ST PLACE VICTORY!';
+        if (this.soundEngine) this.soundEngine.playVictoryFanfare();
+      } else if (results.position === 2) {
+        if (trophy) trophy.textContent = '🥈';
+        if (header) header.textContent = '2ND PLACE FINISH!';
+      } else {
+        if (trophy) trophy.textContent = '🏁';
+        if (header) header.textContent = `${results.position}${this._getOrdinal(results.position)} PLACE FINISH`;
+      }
+
+      // Render Multiplayer Final Standings
+      if (this.resMpStandingsBox && this.resMpStandingsList && results.standings) {
+        this.resMpStandingsBox.style.display = 'block';
+        this.resMpStandingsList.innerHTML = '';
+
+        results.standings.forEach((r, idx) => {
+          const row = document.createElement('div');
+          const isWinner = (r.position === 1 || idx === 0);
+          const isLocal = r.isLocal || (r.id === this.multiplayerManager?.playerId);
+          row.className = `mp-podium-row ${isWinner ? 'is-winner' : ''} ${isLocal ? 'is-self' : ''}`;
+          row.innerHTML = `
+            <span><strong>#${r.position || idx + 1}</strong> ${r.name || 'Racer'} ${isLocal ? '(YOU)' : ''}</span>
+            <span>${r.formattedTime || (r.time ? this.formatTime(r.time) : '--:--.--')}</span>
+          `;
+          this.resMpStandingsList.appendChild(row);
+        });
+      }
+
+      // Show next circuit preview banner
+      const nextLvlId = results.nextLevelId || ((this.levelManager.currentLevelId % 5) + 1);
+      const nextLvl = this.levelManager.getLevel(nextLvlId);
+      if (unlockRow && nextLvl) {
+        unlockRow.style.display = 'flex';
+        if (unlockText) unlockText.textContent = `NEXT CIRCUIT: ${nextLvl.badge} (${nextLvl.title})`;
+      }
+
+      const isHost = !!this.multiplayerManager?.isHost;
       if (this.btnNextLevel) {
         this.btnNextLevel.style.display = 'inline-block';
-        this.btnNextLevel.textContent = `RACE ${nextLvl.badge} ➔`;
+        this.btnNextLevel.textContent = isHost ? `⚡ NEXT CIRCUIT (MP) ➔` : `⏳ WAITING FOR HOST...`;
+      }
+      if (this.btnRetryRace) {
+        this.btnRetryRace.textContent = isHost ? 'RESTART RACE (MP)' : 'WAIT FOR RESTART';
       }
     } else {
-      const nextId = this.levelManager.currentLevelId + 1;
-      if (this.levelManager.isLevelUnlocked(nextId) && this.btnNextLevel) {
-        const nextLvl = this.levelManager.getLevel(nextId);
-        this.btnNextLevel.style.display = 'inline-block';
-        this.btnNextLevel.textContent = `RACE ${nextLvl.badge} ➔`;
-      } else if (this.btnNextLevel) {
-        this.btnNextLevel.style.display = 'none';
+      // --- SINGLE PLAYER RESULTS MODE ---
+      if (this.resMpStandingsBox) this.resMpStandingsBox.style.display = 'none';
+      if (starsRow) {
+        starsRow.style.display = 'flex';
+        if (levelResult) {
+          let stars = '';
+          for (let s = 1; s <= 3; s++) {
+            stars += s <= levelResult.starsEarned ? '⭐' : '☆';
+          }
+          starsRow.textContent = stars;
+        }
       }
-      if (unlockRow) unlockRow.style.display = 'none';
+
+      if (results.position === 1) {
+        if (trophy) trophy.textContent = '🏆';
+        if (header) header.textContent = '1ST PLACE VICTORY!';
+        if (this.soundEngine) this.soundEngine.playVictoryFanfare();
+      } else {
+        if (trophy) trophy.textContent = '🏁';
+        if (header) header.textContent = `${results.position}${this._getOrdinal(results.position)} PLACE FINISH`;
+      }
+
+      if (this.btnRetryRace) {
+        this.btnRetryRace.textContent = 'RACE AGAIN';
+      }
+
+      // Show unlock alert and Next Level button if newly unlocked or available
+      if (levelResult && levelResult.newlyUnlocked) {
+        const nextLvl = this.levelManager.getLevel(levelResult.newlyUnlocked);
+        if (unlockRow) unlockRow.style.display = 'flex';
+        if (unlockText) unlockText.textContent = `UNLOCKED: ${nextLvl.badge} (${nextLvl.title})!`;
+        if (this.btnNextLevel) {
+          this.btnNextLevel.style.display = 'inline-block';
+          this.btnNextLevel.textContent = `RACE ${nextLvl.badge} ➔`;
+        }
+      } else {
+        const nextId = this.levelManager.currentLevelId + 1;
+        if (this.levelManager.isLevelUnlocked(nextId) && this.btnNextLevel) {
+          const nextLvl = this.levelManager.getLevel(nextId);
+          this.btnNextLevel.style.display = 'inline-block';
+          this.btnNextLevel.textContent = `RACE ${nextLvl.badge} ➔`;
+        } else if (this.btnNextLevel) {
+          this.btnNextLevel.style.display = 'none';
+        }
+        if (unlockRow) unlockRow.style.display = 'none';
+      }
     }
+  }
+
+  formatTime(seconds) {
+    if (typeof seconds !== 'number' || isNaN(seconds)) return '0:00.00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds * 100) % 100);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
   }
 
   playUiClick() {
@@ -495,5 +636,179 @@ export class UIManager {
     if (n === 2) return 'ND';
     if (n === 3) return 'RD';
     return 'TH';
+  }
+
+  // ===========================================================================
+  // MULTIPLAYER LOBBY & LIVE STANDINGS HUD
+  // ===========================================================================
+  bindMultiplayer(mpManager) {
+    this.multiplayerManager = mpManager;
+    if (!mpManager) return;
+
+    // Load saved driver name - use sessionStorage for tab-distinct names on same browser
+    let savedName = sessionStorage.getItem('apex_racer_name');
+    if (!savedName) {
+      const randNum = Math.floor(10 + Math.random() * 90);
+      savedName = `Racer ${randNum}`;
+      sessionStorage.setItem('apex_racer_name', savedName);
+    }
+    if (this.mpInputName) {
+      this.mpInputName.value = savedName;
+      mpManager.playerName = savedName;
+    }
+
+    // Set callbacks from multiplayer manager
+    mpManager.setCallbacks({
+      onConnectChange: (connected) => {
+        if (this.mpStatusDot) {
+          this.mpStatusDot.className = `status-dot ${connected ? 'online' : 'offline'}`;
+        }
+        if (this.mpStatusLabel) {
+          this.mpStatusLabel.textContent = connected ? 'CONNECTED TO LOCALHOST' : 'DISCONNECTED - RETRYING...';
+        }
+      },
+      onJoined: (data) => {
+        this._updateLobbyUI(data.room, data.playerId);
+      },
+      onRoomStateChange: (room) => {
+        this._updateLobbyUI(room, mpManager.playerId);
+      },
+      onPlayerJoined: (player) => {
+        this.playUiClick();
+        if (mpManager.room) this._updateLobbyUI(mpManager.room, mpManager.playerId);
+      },
+      onPlayerLeft: (playerId) => {
+        if (mpManager.room) this._updateLobbyUI(mpManager.room, mpManager.playerId);
+      },
+      onLevelSelected: (levelId, laps) => {
+        if (this.mpSelectCircuit) this.mpSelectCircuit.value = levelId;
+        if (this.mpSelectLaps) this.mpSelectLaps.value = laps;
+      }
+    });
+
+    // Driver name change
+    if (this.mpInputName) {
+      this.mpInputName.addEventListener('change', () => {
+        const val = this.mpInputName.value.trim() || 'Racer';
+        sessionStorage.setItem('apex_racer_name', val);
+        mpManager.updateProfile(val);
+      });
+    }
+
+    // Join room button
+    if (this.btnMpJoin) {
+      this.btnMpJoin.addEventListener('click', () => {
+        this.playUiClick();
+        const roomId = this.mpInputRoom?.value || 'BHARAT-101';
+        const name = this.mpInputName?.value || 'Racer';
+        mpManager.joinRoom(roomId, name, this.levelManager.selectedCarModel || 'apex_gtr', this.levelManager.getCarColor());
+      });
+    }
+
+    // Host circuit & laps selection change
+    if (this.mpSelectCircuit) {
+      this.mpSelectCircuit.addEventListener('change', () => {
+        const lvlId = parseInt(this.mpSelectCircuit.value, 10);
+        const laps = parseInt(this.mpSelectLaps?.value || '2', 10);
+        mpManager.selectLevel(lvlId, laps);
+      });
+    }
+
+    if (this.mpSelectLaps) {
+      this.mpSelectLaps.addEventListener('change', () => {
+        const lvlId = parseInt(this.mpSelectCircuit?.value || '1', 10);
+        const laps = parseInt(this.mpSelectLaps.value, 10);
+        mpManager.selectLevel(lvlId, laps);
+      });
+    }
+
+    // Host launch multiplayer race button
+    if (this.btnMpLaunchRace) {
+      this.btnMpLaunchRace.addEventListener('click', () => {
+        this.playUiClick();
+        if (!mpManager.isHost && mpManager.room && mpManager.room.hostId !== mpManager.playerId) {
+          alert('Only the room host can launch the multiplayer race.');
+          return;
+        }
+        mpManager.startRace();
+      });
+    }
+
+    // Local 2-Player Split-Screen button
+    if (this.btnStartSplitScreen) {
+      this.btnStartSplitScreen.addEventListener('click', () => {
+        this.playUiClick();
+        if (this.actions.onStartSplitScreen) {
+          this.actions.onStartSplitScreen();
+        }
+      });
+    }
+  }
+
+  _updateLobbyUI(room, localPlayerId) {
+    if (!room) return;
+
+    if (this.mpRoomTitle) this.mpRoomTitle.textContent = room.id;
+    if (this.mpPlayersCount) this.mpPlayersCount.textContent = `${room.players.length}/4`;
+
+    const isHost = (room.hostId === localPlayerId) || !!this.multiplayerManager?.isHost;
+    if (this.mpHostBadge) {
+      this.mpHostBadge.textContent = isHost ? '👑 HOST' : 'RACER';
+      this.mpHostBadge.style.background = isHost ? '#00f0ff' : '#94a3b8';
+      this.mpHostBadge.style.color = isHost ? '#0f172a' : '#fff';
+    }
+
+    // Show host controls to host only
+    if (this.mpHostControls) {
+      this.mpHostControls.style.display = isHost ? 'flex' : 'none';
+    }
+    if (this.mpClientWaiting) {
+      this.mpClientWaiting.classList.toggle('hidden', isHost);
+    }
+
+    // Render racers in lobby
+    if (this.mpPlayersList) {
+      this.mpPlayersList.innerHTML = '';
+      room.players.forEach(p => {
+        const row = document.createElement('div');
+        const isSelf = p.id === localPlayerId;
+        row.className = `mp-player-row ${isSelf ? 'is-self' : ''}`;
+
+        const hexColor = '#' + (p.color || 0x00f0ff).toString(16).padStart(6, '0');
+        row.innerHTML = `
+          <div class="mp-player-info">
+            <span class="mp-slot-pill ${p.slot === 1 ? 'p1' : 'p2'}">P${p.slot}</span>
+            <span class="mp-color-dot" style="background-color: ${hexColor};"></span>
+            <span class="mp-player-name">${p.name} ${isSelf ? '(YOU)' : ''}</span>
+          </div>
+          <div class="mp-player-meta">
+            <span>${p.isHost ? '👑 HOST' : 'READY'}</span>
+          </div>
+        `;
+        this.mpPlayersList.appendChild(row);
+      });
+    }
+  }
+
+  updateMultiplayerLeaderboard(standings) {
+    if (!this.mpBoardList || !standings || standings.length === 0) return;
+    this.mpBoardList.innerHTML = '';
+
+    standings.forEach((racer, idx) => {
+      const row = document.createElement('div');
+      row.className = `mp-board-row ${racer.isLocal ? 'is-p1' : ''}`;
+      const pct = (racer.progressPct !== undefined) ? racer.progressPct : Math.min(100, Math.max(0, Math.round((racer.progress || 0) * 100)));
+      row.innerHTML = `
+        <span><strong class="mp-board-pos">#${idx + 1}</strong> ${racer.name} ${racer.isLocal ? '(YOU)' : ''}</span>
+        <span>${pct}%</span>
+      `;
+      this.mpBoardList.appendChild(row);
+    });
+  }
+
+  showMultiplayerLeaderboard(show = true) {
+    if (this.mpLiveLeaderboard) {
+      this.mpLiveLeaderboard.classList.toggle('hidden', !show);
+    }
   }
 }

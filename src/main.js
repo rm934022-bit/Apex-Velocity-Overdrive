@@ -20,6 +20,8 @@ import { LevelManager } from './levels/LevelManager.js';
 import { UIManager } from './ui/UIManager.js';
 import { TireSmokeSystem } from './effects/TireSmokeSystem.js';
 import { CrashSparksSystem } from './effects/CrashSparksSystem.js';
+import { GtaRaceIntro } from './cinematics/GtaRaceIntro.js';
+import { MultiplayerManager } from './multiplayer/MultiplayerManager.js';
 
 class RacingGame {
   constructor() {
@@ -36,6 +38,18 @@ class RacingGame {
     this.tireSmoke = null;
     this.crashSparks = null;
     this.crashShake = 0;
+    this.gtaIntro = null;
+    this.multiplayerManager = null;
+    this.isMultiplayerRace = false;
+    this.isSplitScreen = false;
+
+    // Player 2 State (Local Split-Screen Mode)
+    this.p2Physics = null;
+    this.p2Assembly = null;
+    this.p2Camera = null;
+    this.p2CameraYaw = 0;
+    this.p2SmoothedLookAt = null;
+    this.p2Input = { forward: 0, steer: 0, handbrake: false, boost: false };
 
     // Lighting References for Dynamic Atmospheres
     this.sunLight = null;
@@ -52,7 +66,7 @@ class RacingGame {
     // AI Rivals
     this.aiRacers = [];
 
-    // Game States: 'MENU', 'RACING', 'PAUSED', 'FINISHED'
+    // Game States: 'MENU', 'STARTING_GRID', 'RACING', 'PAUSED', 'FINISHED'
     this.gameState = 'MENU';
     this.menuOrbitAngle = 0;
 
@@ -63,6 +77,20 @@ class RacingGame {
 
     // Input State
     this.input = { forward: 0, steer: 0, handbrake: false, boost: false };
+    this.p2Input = { forward: 0, steer: 0, handbrake: false, boost: false };
+
+    // Multiplayer & Split-Screen Modes
+    this.isMultiplayerRace = false;
+    this.isSplitScreen = false;
+    this.isLocalPlayerFinished = false;
+    this.multiplayerResultsShown = false;
+    this.localFinishTime = 0;
+    this.localFormattedTime = '0:00.00';
+    this.p2Physics = null;
+    this.p2Assembly = null;
+    this.p2Camera = null;
+    this.p2CameraYaw = 0;
+    this.p2SmoothedLookAt = new THREE.Vector3();
 
     // Timing
     this.lastTime = performance.now();
@@ -90,8 +118,16 @@ class RacingGame {
 
     // Resize listener
     window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
+      if (this.isSplitScreen && this.p2Camera) {
+        const halfHeight = window.innerHeight / 2;
+        this.camera.aspect = window.innerWidth / halfHeight;
+        this.camera.updateProjectionMatrix();
+        this.p2Camera.aspect = window.innerWidth / halfHeight;
+        this.p2Camera.updateProjectionMatrix();
+      } else {
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+      }
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
@@ -112,22 +148,35 @@ class RacingGame {
     // 7. Checkpoint System (Configured with current level laps)
     const currentLevel = this.levelManager.getCurrentLevel();
     this.checkpointSystem = new CheckpointSystem(this.trackBuilder.getTrackSpline(), currentLevel.laps);
+    window.__checkpointSystem = this.checkpointSystem;
 
-    // 8. Initialize Lighting & Atmospheric Environment Preset
+    // 8. GTA 5 Style Race Start Cinematics & Multiplayer Manager
+    this.gtaIntro = new GtaRaceIntro(this.camera, this.soundEngine);
+    this.multiplayerManager = new MultiplayerManager(this.scene, this.tireSmoke, this.crashSparks);
+
+    // 9. Initialize Lighting & Atmospheric Environment Preset
     this._setupLightingNodes();
     this._applyAtmosphereForLevel(currentLevel);
 
-    // 9. Build Player Car with saved color
+    // 10. Build Player Car with saved color
     const savedColor = this.levelManager.getCarColor();
     this._spawnPlayerCar(this.playerCarData, savedColor, 'none');
 
-    // 9. Build Rival Supercar (Calibrated to current level)
+    // 11. Build Rival Supercar (Calibrated to current level)
     this._spawnAIRivals(currentLevel);
+    this._alignCarToCurrentTrackStart();
 
-    // 10. UI Manager (Binds Home Menu, Level Cards, Swatches, Pause System & HUD)
+    // 12. UI Manager (Binds Home Menu, Level Cards, Swatches, Pause System & HUD)
     this.uiManager = new UIManager(this.soundEngine, this.levelManager, {
       onStartRace: (levelId) => {
+        // If connected to a multiplayer party, leave room so singleplayer is fully isolated
+        if (this.multiplayerManager?.isConnected && this.multiplayerManager?.room) {
+          this.multiplayerManager.leaveRoom();
+        }
         this.startRaceWithLevel(levelId);
+      },
+      onStartSplitScreen: () => {
+        this.startSplitScreenRace();
       },
       onSelectLevel: (levelId) => {
         const lvl = this.levelManager.getLevel(levelId);
@@ -158,15 +207,60 @@ class RacingGame {
       onRestartRace: () => {
         this.startRaceWithLevel(this.levelManager.currentLevelId);
       },
+      onNextMultiplayerRace: () => {
+        if (!this.multiplayerManager?.isConnected || !this.multiplayerManager?.room) {
+          this.returnToHomeMenu();
+          return;
+        }
+
+        if (this.multiplayerManager.isHost) {
+          // Advance room to next circuit (1 -> 2 -> 3 -> 4 -> 5 -> 1)
+          const nextLevelId = (this.levelManager.currentLevelId % 5) + 1;
+          const laps = this.multiplayerManager.room.laps || 2;
+          console.log(`[Multiplayer] Host advancing room to next circuit: Level ${nextLevelId}`);
+          this.multiplayerManager.selectLevel(nextLevelId, laps);
+          this.multiplayerManager.startRace();
+        } else {
+          alert('Waiting for room host to launch the next circuit...');
+        }
+      },
+      onRestartMultiplayerRace: () => {
+        if (this.multiplayerManager?.isHost) {
+          this.multiplayerManager.startRace();
+        } else {
+          alert('Waiting for room host to restart the race...');
+        }
+      },
       onReturnToMenu: () => {
+        if (this.multiplayerManager?.isConnected && this.multiplayerManager?.room) {
+          this.multiplayerManager.leaveRoom();
+        }
         this.returnToHomeMenu();
       }
     });
 
-    // 11. Initial state: Show Home Menu
+    // Wire up multiplayer lobby & WebSocket callbacks
+    this.uiManager.bindMultiplayer(this.multiplayerManager);
+    this.multiplayerManager.setCallbacks({
+      onRaceLaunch: (config) => {
+        this.startMultiplayerRace(config);
+      },
+      onPlayerFinished: (msg) => {
+        if (this.isLocalPlayerFinished) {
+          const finishedCount = msg.finishedCount || (1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length);
+          const totalCount = msg.totalCount || Math.max(2, this.multiplayerManager.room?.players?.length || 2);
+          this.uiManager.showWaitingForOthers(true, finishedCount, totalCount);
+        }
+      },
+      onAllPlayersFinished: (msg) => {
+        this._showMultiplayerResults(msg.results);
+      }
+    });
+
+    // 13. Initial state: Show Home Menu
     this.uiManager.showHomeMenu();
 
-    // 12. Bind Keyboard & Pointer Controls
+    // 14. Bind Keyboard & Pointer Controls
     this._bindInput();
 
     // Start Simulation Loop
@@ -502,6 +596,12 @@ class RacingGame {
 
   startRaceWithLevel(levelId) {
     this._ensureAudio();
+    this.isMultiplayerRace = false;
+    this.isSplitScreen = false;
+    this.isLocalPlayerFinished = false;
+    this.multiplayerResultsShown = false;
+    this.uiManager.showWaitingForOthers(false);
+    if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
     this.levelManager.setLevel(levelId);
     const level = this.levelManager.getCurrentLevel();
 
@@ -514,7 +614,6 @@ class RacingGame {
 
     // 3. Configure checkpoint laps & current track spline
     this.checkpointSystem.setTrackSpline(spline, level.laps);
-    this.checkpointSystem.startRace();
 
     // 4. Reset player vehicle on starting grid aligned with track start
     const startPt = spline.getPointAt(0);
@@ -533,37 +632,223 @@ class RacingGame {
     this.playerAssembly.root.position.copy(playerPos);
     this.playerAssembly.root.rotation.y = heading;
 
-    // 5. Reset AI rival with level top speed and new spline
+    // 5. Reset AI rival with level top speed and new spline (Single player mode)
     if (this.aiRacers.length > 0) {
-      const ai = this.aiRacers[0];
-      ai.setTopSpeed(level.aiTopSpeedKmh);
-      ai.setTrackSpline(spline);
-      ai.setTotalLaps(level.laps);
-      ai.reset(0.014, -2.6);
+      this.aiRacers.forEach(ai => {
+        if (!this.scene.children.includes(ai.mesh)) {
+          this.scene.add(ai.mesh);
+        }
+        ai.mesh.visible = true;
+        ai.setTopSpeed(level.aiTopSpeedKmh);
+        ai.setTrackSpline(spline);
+        ai.setTotalLaps(level.laps);
+        ai.reset(0.014, -2.6);
+      });
     }
 
-    // 6. Camera setup behind car aligned with starting straight
-    this.uiManager.hideHomeMenu();
-    const chaseDist = 5.6;
-    const chaseHeight = 2.2;
-    const offset = new THREE.Vector3(
-      -Math.sin(heading) * chaseDist,
-      chaseHeight,
-      -Math.cos(heading) * chaseDist
-    );
-    this.camera.position.copy(playerPos).add(offset);
-    this.smoothedLookAt.copy(playerPos).add(new THREE.Vector3(
-      Math.sin(heading) * 8.0,
-      1.15,
-      Math.cos(heading) * 8.0
-    ));
-    this.camera.lookAt(this.smoothedLookAt);
+    if (this.p2Assembly) {
+      this.p2Assembly.root.visible = false;
+    }
+    if (this.multiplayerManager) {
+      this.multiplayerManager.clearRemoteRacers();
+    }
 
-    this.gameState = 'RACING';
+    // 6. UI Transition & GTA 5 Cinematic Intro Sequence
+    this.uiManager.hideHomeMenu();
+    this.uiManager.showMultiplayerLeaderboard(false);
+
     if (this.soundEngine) {
       this.soundEngine.stopMenuMusic();
-      this.soundEngine.startRaceMusic();
     }
+
+    this.gameState = 'STARTING_GRID';
+    this.gtaIntro.start(playerPos, heading, level, 1, () => {
+      this.gameState = 'RACING';
+      this.checkpointSystem.startRace();
+      if (this.soundEngine) {
+        this.soundEngine.startRaceMusic();
+      }
+    });
+  }
+
+  startMultiplayerRace(config) {
+    this._ensureAudio();
+    this.isMultiplayerRace = true;
+    this.isSplitScreen = false;
+    this.isLocalPlayerFinished = false;
+    this.multiplayerResultsShown = false;
+    this.uiManager.showWaitingForOthers(false);
+    if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
+
+    this.levelManager.setLevel(config.levelId || 1);
+    const level = this.levelManager.getCurrentLevel();
+    if (config.laps) level.laps = config.laps;
+
+    // Rebuild track for selected circuit
+    this.trackBuilder.buildCircuit(level.id);
+    const spline = this.trackBuilder.getTrackSpline();
+    this._applyAtmosphereForLevel(level);
+
+    // Configure checkpoints
+    this.checkpointSystem.setTrackSpline(spline, level.laps);
+    this.checkpointSystem.startRace();
+
+    // Stop and completely remove AI cars from the scene in multiplayer match
+    this.aiRacers.forEach(ai => {
+      ai.stopCar();
+      ai.mesh.visible = false;
+      this.scene.remove(ai.mesh);
+    });
+
+    if (this.p2Assembly) {
+      this.p2Assembly.root.visible = false;
+    }
+
+    // Spawn 3D remote cars for all other players
+    this.multiplayerManager.setupRacersForGrid(config.grid || [], spline);
+
+    const startPt = spline.getPointAt(0);
+    const tangent = spline.getTangentAt(0).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const heading = Math.atan2(tangent.x, tangent.z);
+
+    // Position local player on assigned grid slot
+    const mySlot = this.multiplayerManager.slot || 1;
+    const isRight = (mySlot % 2 === 0);
+    const row = Math.floor((mySlot - 1) / 2);
+    const sideOffset = isRight ? -2.6 : 2.6;
+    const backOffset = row * 9.5 + (isRight ? 3.8 : 0);
+
+    const playerPos = startPt.clone()
+      .add(normal.clone().multiplyScalar(sideOffset))
+      .sub(tangent.clone().multiplyScalar(backOffset));
+    playerPos.y = 0;
+
+    this.playerPhysics.position.copy(playerPos);
+    this.playerPhysics.rotationY = heading;
+    this.cameraYaw = heading;
+    this.playerPhysics.speed = 0;
+    this.playerPhysics.velocity.set(0, 0, 0);
+    this.playerPhysics.nitro = 100;
+    this.playerAssembly.root.position.copy(playerPos);
+    this.playerAssembly.root.rotation.y = heading;
+
+    this.uiManager.hideHomeMenu();
+    this.uiManager.showMultiplayerLeaderboard(true);
+
+    if (this.soundEngine) {
+      this.soundEngine.stopMenuMusic();
+    }
+
+    this.gameState = 'STARTING_GRID';
+    this.gtaIntro.start(playerPos, heading, level, mySlot, () => {
+      this.gameState = 'RACING';
+      this.checkpointSystem.startRace();
+      if (this.soundEngine) {
+        this.soundEngine.startRaceMusic();
+      }
+    });
+  }
+
+  _showMultiplayerResults(serverResults = null) {
+    if (this.multiplayerResultsShown) return;
+    this.multiplayerResultsShown = true;
+    this.gameState = 'FINISHED';
+
+    this.uiManager.showWaitingForOthers(false);
+
+    let standings = serverResults;
+    if (!standings || standings.length === 0) {
+      standings = this.multiplayerManager.getStandings(100);
+    }
+
+    const myIdx = standings.findIndex(s => s.id === this.multiplayerManager.playerId || s.isLocal);
+    const myPosition = myIdx >= 0 ? (standings[myIdx].position || myIdx + 1) : 1;
+
+    this.uiManager.showResults({
+      position: myPosition,
+      totalTime: this.localFormattedTime || this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime),
+      bestLapTime: this.checkpointSystem.bestLapTime ? this.checkpointSystem.formatTime(this.checkpointSystem.bestLapTime) : '--:--.--',
+      isMultiplayer: true,
+      standings: standings,
+      nextLevelId: ((this.levelManager.currentLevelId % 5) + 1)
+    });
+  }
+
+  startSplitScreenRace() {
+    this._ensureAudio();
+    this.isSplitScreen = true;
+    this.isMultiplayerRace = false;
+
+    const level = this.levelManager.getCurrentLevel();
+    this.trackBuilder.buildCircuit(level.id);
+    const spline = this.trackBuilder.getTrackSpline();
+    this._applyAtmosphereForLevel(level);
+
+    this.checkpointSystem.setTrackSpline(spline, level.laps);
+
+    this.aiRacers.forEach(ai => {
+      ai.mesh.visible = false;
+    });
+
+    const startPt = spline.getPointAt(0);
+    const tangent = spline.getTangentAt(0).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const heading = Math.atan2(tangent.x, tangent.z);
+
+    // Player 1 on Slot 1
+    const p1Pos = startPt.clone().add(normal.clone().multiplyScalar(2.6));
+    p1Pos.y = 0;
+    this.playerPhysics.position.copy(p1Pos);
+    this.playerPhysics.rotationY = heading;
+    this.cameraYaw = heading;
+    this.playerPhysics.speed = 0;
+    this.playerPhysics.velocity.set(0, 0, 0);
+    this.playerPhysics.nitro = 100;
+    this.playerAssembly.root.position.copy(p1Pos);
+    this.playerAssembly.root.rotation.y = heading;
+
+    // Player 2 on Slot 2
+    const p2Pos = startPt.clone().add(normal.clone().multiplyScalar(-2.6)).sub(tangent.clone().multiplyScalar(3.8));
+    p2Pos.y = 0;
+
+    if (!this.p2Physics) {
+      this.p2Physics = new VehiclePhysics();
+      const p2CarData = CarModelBuilder.buildCar('venom_drift', 0xfacc15, 'green');
+      this.p2Assembly = p2CarData;
+      this.scene.add(p2CarData.root);
+
+      this.p2Camera = new THREE.PerspectiveCamera(65, window.innerWidth / (window.innerHeight / 2), 0.1, 1400);
+      this.p2SmoothedLookAt = new THREE.Vector3();
+      this.p2CameraYaw = heading;
+    } else {
+      this.p2Assembly.root.visible = true;
+    }
+
+    this.p2Physics.position.copy(p2Pos);
+    this.p2Physics.rotationY = heading;
+    this.p2CameraYaw = heading;
+    this.p2Physics.speed = 0;
+    this.p2Physics.velocity.set(0, 0, 0);
+    this.p2Physics.nitro = 100;
+    this.p2Assembly.root.position.copy(p2Pos);
+    this.p2Assembly.root.rotation.y = heading;
+
+    this.uiManager.hideHomeMenu();
+    this.uiManager.showMultiplayerLeaderboard(false);
+
+    if (this.soundEngine) {
+      this.soundEngine.stopMenuMusic();
+    }
+
+    this.gameState = 'STARTING_GRID';
+    this.gtaIntro.start(p1Pos, heading, level, 1, () => {
+      this.gameState = 'RACING';
+      this.checkpointSystem.startRace();
+      if (this.soundEngine) {
+        this.soundEngine.startRaceMusic();
+      }
+    });
   }
 
   _alignCarToCurrentTrackStart() {
@@ -595,6 +880,35 @@ class RacingGame {
 
   returnToHomeMenu() {
     this.gameState = 'MENU';
+    this.isMultiplayerRace = false;
+    this.isSplitScreen = false;
+    this.isLocalPlayerFinished = false;
+    this.multiplayerResultsShown = false;
+    this.uiManager.showWaitingForOthers(false);
+    if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    if (this.renderer) {
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+    }
+    this.uiManager.showMultiplayerLeaderboard(false);
+
+    if (this.multiplayerManager) {
+      this.multiplayerManager.clearRemoteRacers();
+    }
+    if (this.p2Assembly) {
+      this.p2Assembly.root.visible = false;
+    }
+    if (this.aiRacers.length > 0) {
+      this.aiRacers.forEach(ai => {
+        if (!this.scene.children.includes(ai.mesh)) {
+          this.scene.add(ai.mesh);
+        }
+        ai.mesh.visible = true;
+      });
+    }
+
     if (this.soundEngine) {
       this.soundEngine.stopRaceMusic();
       this.soundEngine.startMenuMusic();
@@ -621,18 +935,48 @@ class RacingGame {
     const activeKeys = {};
 
     const syncInputFromKeys = () => {
-      let fwd = 0;
-      if (activeKeys['KeyW'] || activeKeys['ArrowUp']) fwd += 1;
-      if (activeKeys['KeyS'] || activeKeys['ArrowDown']) fwd -= 1;
-      this.input.forward = fwd;
+      if (this.isSplitScreen) {
+        // Player 1 controls (WASD, Space, Left Shift)
+        let fwd1 = 0;
+        if (activeKeys['KeyW']) fwd1 += 1;
+        if (activeKeys['KeyS']) fwd1 -= 1;
+        this.input.forward = fwd1;
 
-      let str = 0;
-      if (activeKeys['KeyA'] || activeKeys['ArrowLeft']) str -= 1; // Left (-1)
-      if (activeKeys['KeyD'] || activeKeys['ArrowRight']) str += 1; // Right (+1)
-      this.input.steer = str;
+        let str1 = 0;
+        if (activeKeys['KeyA']) str1 -= 1;
+        if (activeKeys['KeyD']) str1 += 1;
+        this.input.steer = str1;
 
-      this.input.handbrake = Boolean(activeKeys['Space']);
-      this.input.boost = Boolean(activeKeys['ShiftLeft'] || activeKeys['ShiftRight']);
+        this.input.handbrake = Boolean(activeKeys['Space']);
+        this.input.boost = Boolean(activeKeys['ShiftLeft']);
+
+        // Player 2 controls (Arrow keys, Enter/Numpad0, Right Shift/Right Ctrl)
+        let fwd2 = 0;
+        if (activeKeys['ArrowUp']) fwd2 += 1;
+        if (activeKeys['ArrowDown']) fwd2 -= 1;
+        this.p2Input.forward = fwd2;
+
+        let str2 = 0;
+        if (activeKeys['ArrowLeft']) str2 -= 1;
+        if (activeKeys['ArrowRight']) str2 += 1;
+        this.p2Input.steer = str2;
+
+        this.p2Input.handbrake = Boolean(activeKeys['Enter'] || activeKeys['Numpad0'] || activeKeys['KeyM']);
+        this.p2Input.boost = Boolean(activeKeys['ShiftRight'] || activeKeys['ControlRight'] || activeKeys['KeyN']);
+      } else {
+        let fwd = 0;
+        if (activeKeys['KeyW'] || activeKeys['ArrowUp']) fwd += 1;
+        if (activeKeys['KeyS'] || activeKeys['ArrowDown']) fwd -= 1;
+        this.input.forward = fwd;
+
+        let str = 0;
+        if (activeKeys['KeyA'] || activeKeys['ArrowLeft']) str -= 1; // Left (-1)
+        if (activeKeys['KeyD'] || activeKeys['ArrowRight']) str += 1; // Right (+1)
+        this.input.steer = str;
+
+        this.input.handbrake = Boolean(activeKeys['Space']);
+        this.input.boost = Boolean(activeKeys['ShiftLeft'] || activeKeys['ShiftRight']);
+      }
     };
 
     window.addEventListener('keydown', (e) => {
@@ -719,23 +1063,67 @@ class RacingGame {
       );
       this.camera.lookAt(carPos.x, carPos.y + 0.9, carPos.z);
 
+    } else if (this.gameState === 'STARTING_GRID') {
+      // 1. GTA 5 Style Cinematic Swoop Camera & Synchronized Countdown
+      this.gtaIntro.update(delta, this.playerPhysics.position, this.playerPhysics.rotationY);
+
+      // 2. Idle engine rumble sound
+      if (this.soundEngine && this.soundEngine.updateEngine) {
+        this.soundEngine.updateEngine(0, 0, delta);
+      }
+
+      // 3. Keep visual car meshes aligned
+      this._updateCarVisuals(delta);
+      if (this.isSplitScreen && this.p2Physics) {
+        this._updateP2CarVisuals(delta);
+      }
+
+      // 4. Stream position to multiplayer lobby peers
+      if (this.isMultiplayerRace && this.multiplayerManager) {
+        this.multiplayerManager.update(delta, this.playerPhysics, this.camera);
+      }
+
     } else if (this.gameState === 'RACING') {
       // 1. Update Player Vehicle Physics
-      this.playerPhysics.update(delta, this.input, this.trackBuilder);
+      if (this.isMultiplayerRace && this.isLocalPlayerFinished) {
+        // Smoothly coast car to halt past finish line while waiting for other racers
+        this.playerPhysics.speed = Math.max(0, this.playerPhysics.speed - delta * 14.0);
+        this.playerPhysics.velocity.multiplyScalar(0.95);
+        this.playerPhysics.handbrake = true;
+      } else {
+        this.playerPhysics.update(delta, this.input, this.trackBuilder);
+      }
 
       // 2. Animate Car Visuals
       this._updateCarVisuals(delta);
 
-      // 3. Update AI Rival with track synchronization
-      this.aiRacers.forEach(ai => {
-        ai.update(delta, this.playerPhysics.position, this.trackBuilder);
-      });
+      // Split-Screen Player 2 Physics & Visuals
+      if (this.isSplitScreen && this.p2Physics) {
+        this.p2Physics.update(delta, this.p2Input, this.trackBuilder);
+        this._updateP2CarVisuals(delta);
+        this._checkP1P2Collision();
+        this._updateP2Camera(delta);
+      }
 
-      // 4. Car-to-Car Physical Collisions (Player vs Rival)
-      this._checkCarCollisions();
+      // Networked Multiplayer Telemetry & Remote Cars
+      if (this.isMultiplayerRace && this.multiplayerManager) {
+        this.multiplayerManager.update(delta, this.playerPhysics, this.camera);
+        const standings = this.multiplayerManager.getStandings(this.checkpointSystem.displayedProgress);
+        this.uiManager.updateMultiplayerLeaderboard(standings);
+      }
 
-      // 5. Aerodynamic Drafting & Slipstream Effect
-      this._handleDrafting(delta);
+      // 3. Update AI Rival with track synchronization (Single player mode)
+      if (!this.isSplitScreen && !this.isMultiplayerRace) {
+        this.aiRacers.forEach(ai => {
+          ai.update(delta, this.playerPhysics.position, this.trackBuilder);
+        });
+
+        // 4. Car-to-Car Physical Collisions (Player vs Rival)
+        this._checkCarCollisions();
+
+        // 5. Aerodynamic Drafting & Slipstream Effect
+        this._handleDrafting(delta);
+      }
 
       // 6. Dynamic 3D Tire Smoke when Drifting or Hard Braking
       if (this.tireSmoke) {
@@ -766,43 +1154,113 @@ class RacingGame {
       }
 
       // 7. Checkpoint & Lap System
+      const competitors = this.isMultiplayerRace
+        ? (this.multiplayerManager ? Array.from(this.multiplayerManager.remoteRacers.values()).map(r => ({
+            getPosition: () => r.root.position,
+            getProgress: () => ((r.lap || 1) - 1) + ((r.progressPct || 0) / 100)
+          })) : [])
+        : this.aiRacers;
+
       const raceData = this.checkpointSystem.update(
         delta,
         this.playerPhysics.position,
         this.playerPhysics,
-        this.aiRacers,
+        competitors,
         this.trackBuilder
       );
 
-      // 8. Update HUD
-      this.uiManager.updateHUD(this.playerPhysics, raceData);
+      // 8. Update HUD (Singleplayer isolates HUD and hides multiplayer leaderboard)
+      this.uiManager.updateHUD(this.playerPhysics, raceData, this.isMultiplayerRace);
 
       // 9. Check Race Finish
       if (raceData && raceData.raceFinished) {
-        this.gameState = 'FINISHED';
-        if (this.soundEngine) this.soundEngine.stopRaceMusic();
-        this.aiRacers.forEach(ai => ai.stopCar());
+        if (this.isMultiplayerRace && this.multiplayerManager) {
+          if (!this.isLocalPlayerFinished) {
+            this.isLocalPlayerFinished = true;
+            this.localFinishTime = this.checkpointSystem.totalRaceTime;
+            this.localFormattedTime = this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime);
 
-        const levelResult = this.levelManager.recordRaceResult(
-          this.levelManager.currentLevelId,
-          raceData.position,
-          this.checkpointSystem.totalRaceTime,
-          this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime)
-        );
+            const standings = this.multiplayerManager.getStandings(100);
+            const myRank = standings.findIndex(s => s.isLocal) + 1;
+            this.multiplayerManager.sendFinish(
+              this.localFinishTime,
+              this.localFormattedTime,
+              myRank > 0 ? myRank : 1
+            );
 
-        this.uiManager.showResults({
-          position: raceData.position,
-          totalTime: this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime),
-          bestLapTime: raceData.bestLapTime
-        }, levelResult);
+            if (this.soundEngine) {
+              this.soundEngine.stopRaceMusic();
+              if (this.soundEngine.playVictoryFanfare && myRank === 1) {
+                this.soundEngine.playVictoryFanfare();
+              }
+            }
+
+            const totalRacers = Math.max(2, this.multiplayerManager.room?.players?.length || (this.multiplayerManager.remoteRacers.size + 1));
+            const finishedCount = 1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length;
+            this.uiManager.showWaitingForOthers(true, finishedCount, totalRacers);
+          }
+
+          // Check if all remote racers have also finished
+          const allRemoteFinished = this.multiplayerManager.remoteRacers.size > 0 &&
+            Array.from(this.multiplayerManager.remoteRacers.values()).every(r => r.isFinished);
+
+          if (allRemoteFinished && !this.multiplayerResultsShown) {
+            this._showMultiplayerResults();
+          }
+        } else {
+          // Pure singleplayer finish
+          this.gameState = 'FINISHED';
+          if (this.soundEngine) this.soundEngine.stopRaceMusic();
+          this.aiRacers.forEach(ai => ai.stopCar());
+
+          const levelResult = this.levelManager.recordRaceResult(
+            this.levelManager.currentLevelId,
+            raceData.position,
+            this.checkpointSystem.totalRaceTime,
+            this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime)
+          );
+
+          this.uiManager.showResults({
+            position: raceData.position,
+            totalTime: this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime),
+            bestLapTime: raceData.bestLapTime,
+            isMultiplayer: false
+          }, levelResult);
+        }
       }
 
       // 10. Update Camera
       this._updateCamera(delta);
     }
 
-    // Render Scene
-    this.renderer.render(this.scene, this.camera);
+    // Render Scene (Single Viewport or Split-Screen Viewports)
+    if (this.isSplitScreen && this.p2Camera) {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const halfHeight = Math.floor(height / 2);
+
+      this.renderer.setScissorTest(true);
+
+      // Top Half: Player 1
+      this.renderer.setViewport(0, halfHeight, width, halfHeight);
+      this.renderer.setScissor(0, halfHeight, width, halfHeight);
+      this.camera.aspect = width / halfHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.render(this.scene, this.camera);
+
+      // Bottom Half: Player 2
+      this.renderer.setViewport(0, 0, width, halfHeight);
+      this.renderer.setScissor(0, 0, width, halfHeight);
+      this.p2Camera.aspect = width / halfHeight;
+      this.p2Camera.updateProjectionMatrix();
+      this.renderer.render(this.scene, this.p2Camera);
+
+      this.renderer.setScissorTest(false);
+    } else {
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+      this.renderer.render(this.scene, this.camera);
+    }
 
     requestAnimationFrame((t) => this.loop(t));
   }
@@ -985,6 +1443,120 @@ class RacingGame {
       this.camera.fov = 76 + (this.playerPhysics.isBoosting ? 10 : 0);
       this.camera.updateProjectionMatrix();
     }
+  }
+
+  _checkP1P2Collision() {
+    if (!this.playerPhysics || !this.p2Physics) return;
+    const deltaVec = this.playerPhysics.position.clone().sub(this.p2Physics.position);
+    deltaVec.y = 0;
+    const dist = deltaVec.length();
+    const minDistance = 2.45;
+
+    if (dist < minDistance && dist > 0.001) {
+      const overlap = (minDistance - dist);
+      const normal = deltaVec.clone().divideScalar(dist);
+
+      this.playerPhysics.position.add(normal.clone().multiplyScalar(overlap * 0.55));
+      this.p2Physics.position.sub(normal.clone().multiplyScalar(overlap * 0.55));
+
+      const relSpeed = this.playerPhysics.speed - this.p2Physics.speed;
+      const impactForce = Math.abs(relSpeed);
+
+      if (impactForce > 3.5) {
+        this.playerPhysics.speed = Math.max(8.0, this.playerPhysics.speed - relSpeed * 0.35);
+        this.p2Physics.speed = Math.max(8.0, this.p2Physics.speed + relSpeed * 0.30);
+
+        const contactPt = this.playerPhysics.position.clone().add(this.p2Physics.position).multiplyScalar(0.5);
+        this._triggerCrashEffect({
+          speedKmh: Math.round(impactForce * 3.6),
+          position: contactPt,
+          normal: normal
+        });
+
+        if (this.soundEngine) {
+          this.soundEngine.playCrash(Math.min(1.0, impactForce / 22));
+        }
+      } else {
+        this.playerPhysics.speed -= relSpeed * 0.12;
+        this.p2Physics.speed += relSpeed * 0.10;
+      }
+
+      this.playerPhysics.steerAngle += (Math.random() - 0.5) * 0.08;
+      this.p2Physics.steerAngle -= (Math.random() - 0.5) * 0.08;
+    }
+  }
+
+  _updateP2CarVisuals(delta) {
+    if (!this.p2Assembly || !this.p2Physics) return;
+    const root = this.p2Assembly.root;
+
+    root.position.copy(this.p2Physics.position);
+    root.rotation.y = this.p2Physics.rotationY;
+    root.rotation.z = this.p2Physics.chassisRoll || 0;
+    root.rotation.x = this.p2Physics.chassisPitch || 0;
+
+    const wheelRot = (this.p2Physics.speed * delta) / 0.38;
+    const wheels = this.p2Assembly.wheels;
+    if (wheels) {
+      if (wheels.fl?.rotatingMesh) wheels.fl.rotatingMesh.rotation.x += wheelRot;
+      if (wheels.fr?.rotatingMesh) wheels.fr.rotatingMesh.rotation.x += wheelRot;
+      if (wheels.rl?.rotatingMesh) wheels.rl.rotatingMesh.rotation.x += wheelRot;
+      if (wheels.rr?.rotatingMesh) wheels.rr.rotatingMesh.rotation.x += wheelRot;
+
+      if (wheels.fl?.pivot) wheels.fl.pivot.rotation.y = this.p2Physics.steerAngle;
+      if (wheels.fr?.pivot) wheels.fr.pivot.rotation.y = this.p2Physics.steerAngle;
+    }
+
+    if (this.p2Assembly.exhaustFlames) {
+      this.p2Assembly.exhaustFlames.forEach(f => {
+        f.visible = this.p2Physics.isBoosting;
+      });
+    }
+
+    const isBraking = this.p2Input.forward < 0 || this.p2Input.handbrake;
+    const matTail = this.p2Assembly.materials?.matTaillight || this.p2Assembly.materials?.matRoundTaillight;
+    if (matTail) {
+      matTail.color.setHex(isBraking ? 0xff0022 : 0x880015);
+    }
+  }
+
+  _updateP2Camera(delta) {
+    if (!this.p2Camera || !this.p2Physics) return;
+    const carPos = this.p2Physics.position;
+    const speed = this.p2Physics.getSpeedKmh();
+
+    const targetFov = 65 + Math.min(20, (speed / 280) * 20) + (this.p2Physics.isBoosting ? 8 : 0);
+    this.p2Camera.fov = THREE.MathUtils.lerp(this.p2Camera.fov, targetFov, delta * 8.0);
+    this.p2Camera.updateProjectionMatrix();
+
+    let angleDiff = this.p2Physics.rotationY - this.p2CameraYaw;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    this.p2CameraYaw += angleDiff * Math.min(1.0, delta * 8.5);
+
+    const speedRatio = Math.min(1.0, speed / 300);
+    const chaseDist = 5.6 + speedRatio * 1.6;
+    const chaseHeight = 2.2 + speedRatio * 0.35;
+
+    const offset = new THREE.Vector3(
+      -Math.sin(this.p2CameraYaw) * chaseDist,
+      chaseHeight,
+      -Math.cos(this.p2CameraYaw) * chaseDist
+    );
+
+    const desiredPos = carPos.clone().add(offset);
+    this.p2Camera.position.lerp(desiredPos, Math.min(1.0, delta * 10.0));
+
+    const steerLookAhead = -this.p2Physics.steerAngle * 3.5;
+    const lookDist = 7.0 + speedRatio * 8.0;
+    const lookTarget = carPos.clone().add(new THREE.Vector3(
+      Math.sin(this.p2Physics.rotationY) * lookDist + Math.cos(this.p2Physics.rotationY) * steerLookAhead,
+      1.15,
+      Math.cos(this.p2Physics.rotationY) * lookDist - Math.sin(this.p2Physics.rotationY) * steerLookAhead
+    ));
+
+    this.p2SmoothedLookAt.lerp(lookTarget, Math.min(1.0, delta * 14.0));
+    this.p2Camera.lookAt(this.p2SmoothedLookAt);
   }
 }
 

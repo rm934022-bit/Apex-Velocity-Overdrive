@@ -84,12 +84,30 @@
     <!-- Top Right: Position, Lap & Race Timer -->
     <div id="hud-top-right">
       <div class="pos-title">POS</div>
-      <div class="pos-value"><span id="player-pos-num">1</span>/2</div>
+      <div class="pos-value"><span id="player-pos-num">1</span><span id="player-pos-total">/2</span></div>
       <div class="lap-pill" id="hud-lap-pill">
         <span id="lap-display">LAP 1/2</span>
       </div>
       <div class="race-timer-pill">
         <span id="race-timer-display">0:00.00</span>
+      </div>
+
+      <!-- Real-time Multiplayer Standings Card -->
+      <div id="mp-live-leaderboard" class="hidden">
+        <div class="mp-board-title">MULTIPLAYER STANDINGS</div>
+        <div id="mp-board-list" class="mp-board-list"></div>
+      </div>
+    </div>
+
+    <!-- Multiplayer Finish Waiting Banner -->
+    <div id="mp-waiting-banner" class="hidden">
+      <div class="mp-waiting-pill">
+        <span class="mp-waiting-icon">🏁</span>
+        <div class="mp-waiting-text">
+          <strong id="mp-waiting-title">YOU FINISHED!</strong>
+          <span id="mp-waiting-desc">WAITING FOR OTHER RACERS TO FINISH... <strong id="mp-waiting-count">(1/2)</strong></span>
+        </div>
+        <div class="mp-waiting-spinner"></div>
       </div>
     </div>
 
@@ -99,15 +117,34 @@
     </div>
   </div>
 
-  <!-- START RACE OVERHEAD LIGHTS (3-2-1-GO) -->
-  <div id="countdown-overlay" class="hidden">
-    <div class="gantry-lights">
-      <div class="light-pod" id="light-1"><div class="bulb"></div></div>
-      <div class="light-pod" id="light-2"><div class="bulb"></div></div>
-      <div class="light-pod" id="light-3"><div class="bulb"></div></div>
-      <div class="light-pod" id="light-go"><div class="bulb green"></div></div>
+  <!-- GTA 5 STYLE CINEMATIC OVERLAY & GANTRY LIGHTS -->
+  <div id="gta-cinematic-overlay" class="hidden">
+    <!-- Top & Bottom Widescreen Letterbox Bars -->
+    <div id="gta-letterbox-top" class="gta-cinema-bar top"></div>
+    <div id="gta-letterbox-bottom" class="gta-cinema-bar bottom"></div>
+
+    <!-- GTA 5 Intro Title Card -->
+    <div id="gta-title-card" class="hidden">
+      <div class="gta-card-tag">MADE BY RAJAMANI // APEX VELOCITY</div>
+      <h2 id="gta-track-title" class="gta-track-title">BUDDH GP EXPRESSWAY</h2>
+      <div id="gta-track-subtitle" class="gta-track-subtitle">GREATER NOIDA // 2-LAP SPRINT</div>
+      <div class="gta-meta-row">
+        <span id="gta-grid-slot-badge" class="gta-grid-badge">POLE POSITION // GRID SLOT 1</span>
+        <span class="gta-circuit-badge">🏁 INDIAN CHAMPIONSHIP</span>
+      </div>
+      <div class="gta-skip-hint">PRESS <kbd>SPACE</kbd> TO SKIP INTRO</div>
     </div>
-    <div id="countdown-text">READY</div>
+
+    <!-- START RACE OVERHEAD LIGHTS (3-2-1-GO) -->
+    <div id="countdown-overlay" class="hidden">
+      <div class="gantry-lights">
+        <div class="light-pod" id="light-1"><div class="bulb"></div></div>
+        <div class="light-pod" id="light-2"><div class="bulb"></div></div>
+        <div class="light-pod" id="light-3"><div class="bulb"></div></div>
+        <div class="light-pod" id="light-go"><div class="bulb green"></div></div>
+      </div>
+      <div id="countdown-text">READY</div>
+    </div>
   </div>
 
   <!-- HOME MENU (MAIN MENU & LEVEL SELECTION) -->
@@ -126,6 +163,7 @@
       <!-- Navigation Tabs -->
       <div class="menu-tabs-bar">
         <button class="menu-tab-btn active" data-tab="tab-levels">RACE LEVELS</button>
+        <button class="menu-tab-btn" data-tab="tab-multiplayer">🌐 MULTIPLAYER</button>
         <button class="menu-tab-btn" data-tab="tab-garage">GARAGE & COLORS</button>
         <button class="menu-tab-btn" data-tab="tab-audio">AUDIO & SOUND</button>
         <button class="menu-tab-btn" data-tab="tab-controls">CONTROLS GUIDE</button>
@@ -135,6 +173,114 @@
       <div id="tab-levels" class="tab-pane active">
         <div class="levels-grid" id="levels-container">
           <!-- Populated dynamically by UIManager -->
+        </div>
+      </div>
+
+      <!-- Tab Content: Multiplayer Lobby & Rooms -->
+      <div id="tab-multiplayer" class="tab-pane">
+        <div class="mp-container">
+          <!-- Server Connection Pill -->
+          <div class="mp-server-bar">
+            <div class="mp-status-pill">
+              <span id="mp-status-dot" class="status-dot"></span>
+              <span id="mp-status-label">CONNECTING TO LOCALHOST...</span>
+            </div>
+            <div class="mp-info-pill">💡 Open another tab on <strong>localhost:3000</strong> to race with 2 players!</div>
+          </div>
+
+          <div class="mp-columns-grid">
+            <!-- Left Box: Driver Profile & Room Input -->
+            <div class="mp-card mp-driver-box">
+              <div class="mp-card-header">
+                <span class="mp-step-num">01</span>
+                <div>
+                  <h4>DRIVER IDENTITY & ROOM</h4>
+                  <span>Configure your callsign and room code</span>
+                </div>
+              </div>
+
+              <div class="mp-field-group">
+                <label>YOUR RACER NAME</label>
+                <input type="text" id="mp-input-name" maxlength="15" value="Racer 1" class="mp-input" placeholder="Enter driver name..." />
+              </div>
+
+              <div class="mp-field-group">
+                <label>ROOM CODE</label>
+                <div class="mp-room-join-row">
+                  <input type="text" id="mp-input-room" maxlength="12" value="BHARAT-101" class="mp-input room-code" />
+                  <button id="btn-mp-join" class="mp-btn primary">JOIN / CREATE</button>
+                </div>
+              </div>
+
+              <!-- Local Split-Screen Card -->
+              <div class="mp-splitscreen-box">
+                <div class="split-badge-row">
+                  <span class="split-pill">LOCAL 2P</span>
+                  <span class="split-sub">SAME KEYBOARD</span>
+                </div>
+                <div class="split-title">SPLIT-SCREEN 2-PLAYER RACE</div>
+                <p class="split-desc">Race head-to-head on this single PC! P1: <strong>WASD + L-Shift</strong> | P2: <strong>Arrows + R-Shift</strong>.</p>
+                <button id="btn-start-splitscreen" class="mp-btn split-launch-btn">⚡ START 2P SPLIT-SCREEN</button>
+              </div>
+            </div>
+
+            <!-- Right Box: Room Lobby & Racers List -->
+            <div class="mp-card mp-lobby-box">
+              <div class="mp-card-header">
+                <span class="mp-step-num">02</span>
+                <div class="lobby-title-wrap">
+                  <div class="lobby-header-row">
+                    <h4>ROOM LOBBY: <span id="mp-room-title">BHARAT-101</span></h4>
+                    <span id="mp-host-badge" class="host-pill">HOST</span>
+                  </div>
+                  <span>Waiting for racers to assemble on starting grid</span>
+                </div>
+              </div>
+
+              <!-- Racers Connected Grid -->
+              <div class="mp-racers-section">
+                <div class="mp-racers-header">
+                  <span>RACERS ON GRID</span>
+                  <span id="mp-players-count" class="racers-count">1/4</span>
+                </div>
+                <div id="mp-players-list" class="mp-players-list">
+                  <!-- Injected dynamically by UIManager -->
+                </div>
+              </div>
+
+              <!-- Host Race Launcher -->
+              <div id="mp-host-controls" class="mp-host-controls">
+                <div class="host-cfg-row">
+                  <div class="cfg-col">
+                    <label>CIRCUIT</label>
+                    <select id="mp-select-circuit" class="mp-dropdown">
+                      <option value="1">1. BUDDH GP (Greater Noida)</option>
+                      <option value="2">2. THAR DESERT (Jaisalmer)</option>
+                      <option value="3">3. GOA COAST (Konkan Sea)</option>
+                      <option value="4">4. MUMBAI SEA LINK (Midnight)</option>
+                      <option value="5">5. HIMALAYAN PASS (Ladakh)</option>
+                    </select>
+                  </div>
+                  <div class="cfg-col">
+                    <label>LAPS</label>
+                    <select id="mp-select-laps" class="mp-dropdown">
+                      <option value="2">2 LAPS (Sprint)</option>
+                      <option value="3">3 LAPS (Championship)</option>
+                      <option value="1">1 LAP (Sprint)</option>
+                    </select>
+                  </div>
+                </div>
+                <button id="btn-mp-launch-race" class="mp-btn launch-race-btn">
+                  <span>🚀 LAUNCH MULTIPLAYER RACE</span>
+                </button>
+              </div>
+
+              <div id="mp-client-waiting" class="mp-client-waiting hidden">
+                <div class="mp-waiting-pulse"></div>
+                <span>WAITING FOR HOST TO LAUNCH RACE...</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -339,6 +485,11 @@
         <div class="res-stat-row" id="res-unlock-row" style="display: none;">
           <span style="color: #facc15;">UNLOCKED:</span>
           <strong id="res-unlock-text" style="color: #facc15;">NEXT LEVEL AVAILABLE!</strong>
+        </div>
+        <!-- Multiplayer Final Standings List -->
+        <div id="res-mp-standings-box" style="display: none; margin-top: 10px; width: 100%;">
+          <div style="font-size: 0.72rem; font-weight: 800; color: #94a3b8; letter-spacing: 1.2px; margin-bottom: 6px; text-align: left;">MULTIPLAYER PODIUM</div>
+          <div id="res-mp-standings-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
         </div>
       </div>
       <div class="results-buttons">
