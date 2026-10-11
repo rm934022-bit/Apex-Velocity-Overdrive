@@ -691,7 +691,6 @@ class RacingGame {
 
     // Configure checkpoints
     this.checkpointSystem.setTrackSpline(spline, level.laps);
-    this.checkpointSystem.startRace();
 
     // Stop and completely remove AI cars from the scene in multiplayer match
     this.aiRacers.forEach(ai => {
@@ -747,7 +746,7 @@ class RacingGame {
       if (this.soundEngine) {
         this.soundEngine.startRaceMusic();
       }
-    });
+    }, true);
   }
 
   _showMultiplayerResults(serverResults = null) {

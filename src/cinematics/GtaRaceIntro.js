@@ -57,16 +57,17 @@ export class GtaRaceIntro {
     this.bassDropTriggered = false;
     this.lastCountSecond = -1;
 
-    // Bind Skip Key
+    // Bind Skip Key (disabled in multiplayer to maintain synchronized grid launch)
     window.addEventListener('keydown', (e) => {
-      if (this.isActive && (e.code === 'Space' || e.code === 'Enter')) {
+      if (this.isActive && !this.isMultiplayer && (e.code === 'Space' || e.code === 'Enter')) {
         this.skip();
       }
     });
   }
 
-  start(playerPos, heading, level, gridSlot = 1, onComplete = null) {
+  start(playerPos, heading, level, gridSlot = 1, onComplete = null, isMultiplayer = false) {
     this.isActive = true;
+    this.isMultiplayer = !!isMultiplayer;
     this.timer = 0;
     this.whooshTriggered = false;
     this.bassDropTriggered = false;
@@ -255,7 +256,7 @@ export class GtaRaceIntro {
   }
 
   skip() {
-    if (!this.isActive) return;
+    if (!this.isActive || this.isMultiplayer) return;
     if (this.timer < 3.2) {
       // Jump directly to countdown
       this.timer = 3.2;

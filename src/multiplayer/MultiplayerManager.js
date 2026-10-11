@@ -744,15 +744,19 @@ export class MultiplayerManager {
             laps: this.room.laps || 2,
             timestamp: Date.now()
           };
+          console.log(`[Multiplayer Host] Launching race for all ${launchMsg.grid.length} racers in room ${this.room.id}!`);
           this._broadcast(launchMsg);
-          this._handleIncomingPacket(`${this.topicBase}/broadcast`, launchMsg);
+          if (this.callbacks.onRaceLaunch) {
+            this.callbacks.onRaceLaunch(launchMsg);
+          }
         }
       } else if (data.type === 'RETURN_TO_LOBBY') {
         if (this.room) {
           this.room.state = 'LOBBY';
           this.finishedPlayers = [];
+          this.clearRemoteRacers();
           this._broadcast({ type: 'RETURNED_TO_LOBBY' });
-          this._handleIncomingPacket(`${this.topicBase}/broadcast`, { type: 'RETURNED_TO_LOBBY' });
+          if (this.callbacks.onRoomStateChange) this.callbacks.onRoomStateChange(this.room);
         }
       } else if (data.type === 'FINISH_RACE') {
         this._handlePlayerFinish(this.playerId, data.time, data.formattedTime);
