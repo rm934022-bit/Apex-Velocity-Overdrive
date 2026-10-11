@@ -328,10 +328,10 @@ export class MultiplayerManager {
     this.hostCheckInterval = setInterval(() => {
       if (this.isHost || !this.room) return;
 
-      // If host has been silent for > 7.5 seconds, elect new host
+      // If host has been silent for > 35 seconds across all channels, elect new host
       const silentSec = (Date.now() - this.lastHostHeartbeat) / 1000;
-      if (silentSec > 7.5) {
-        console.warn(`[Multiplayer] Host silent for ${silentSec.toFixed(1)}s. Self-healing room...`);
+      if (silentSec > 35.0) {
+        console.warn(`[Multiplayer] Host silent for ${silentSec.toFixed(1)}s across all channels. Self-healing room...`);
 
         // Lowest slot racer becomes new host
         const remaining = this.room.players.filter(p => p.id !== this.room.hostId);
@@ -347,7 +347,7 @@ export class MultiplayerManager {
           if (this.callbacks.onRoomStateChange) this.callbacks.onRoomStateChange(this.room);
         }
       }
-    }, 3500);
+    }, 5000);
   }
 
   // ===========================================================================
@@ -359,6 +359,11 @@ export class MultiplayerManager {
 
     if (this._tempHostListener) {
       this._tempHostListener(topic, msg);
+    }
+
+    // Any packet originating from host, directed to host, or from room broadcast proves host is actively connected
+    if (this.room && (msg.hostId === this.room.hostId || msg.id === this.room.hostId || msg.playerId === this.room.hostId || topic?.endsWith('/broadcast'))) {
+      this.lastHostHeartbeat = Date.now();
     }
 
     // -------------------------------------------------------------
@@ -455,9 +460,15 @@ export class MultiplayerManager {
         break;
 
       case 'RACE_LAUNCH':
-        if (this.isHost) break;
+        if (this.isHost) {
+          if (this.lastLaunchedTimestamp && (Date.now() - this.lastLaunchedTimestamp) < 2500) {
+            break;
+          }
+        }
         if (this.room) {
           this.room.state = 'RACING';
+          this.room.levelId = msg.levelId || this.room.levelId;
+          this.room.laps = msg.laps || this.room.laps;
         }
         console.log(`[Multiplayer] Synchronized race launch received for level ${msg.levelId}!`);
         if (this.callbacks.onRaceLaunch) {
@@ -649,6 +660,21 @@ export class MultiplayerManager {
         }
       }
     }
+
+    else if (msg.type === 'REQUEST_NEXT_CIRCUIT') {
+      console.log(`[Multiplayer Host] Received REQUEST_NEXT_CIRCUIT from racer ${msg.playerId}`);
+      const nextLevelId = ((this.room.levelId || 1) % 5) + 1;
+      const laps = this.room.laps || 2;
+      this.room.levelId = nextLevelId;
+      this.room.laps = laps;
+      this._broadcast({ type: 'LEVEL_SELECTED', levelId: nextLevelId, laps });
+      this.send({ type: 'START_RACE' });
+    }
+
+    else if (msg.type === 'START_RACE' || msg.type === 'REQUEST_RESTART_RACE') {
+      console.log(`[Multiplayer Host] Received race start / restart request from racer ${msg.playerId}`);
+      this.send({ type: 'START_RACE' });
+    }
   }
 
   _handlePlayerFinish(playerId, time, formattedTime) {
@@ -754,6 +780,7 @@ export class MultiplayerManager {
         if (this.room) {
           this.room.state = 'RACING';
           this.finishedPlayers = [];
+          this.lastLaunchedTimestamp = Date.now();
           const launchMsg = {
             type: 'RACE_LAUNCH',
             grid: this._getSanitizedRoom().players,
@@ -953,7 +980,9 @@ export class MultiplayerManager {
       isDrifting: false,
       isBoosting: false,
       lap: 1,
-      progressPct: 0
+      progressPct: 0,
+      isFinished: false,
+      finishTime: null
     };
 
     return racer;

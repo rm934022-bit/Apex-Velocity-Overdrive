@@ -48,9 +48,14 @@ export class CheckpointSystem {
   setTrackSpline(trackSpline, totalLaps) {
     this.trackSpline = trackSpline;
     if (totalLaps) this.totalLaps = totalLaps;
+    this.currentLap = 1;
+    this.currentCheckpointIndex = 0;
+    this.maxCheckpointVisited = 0;
+    this.currentLapTime = 0;
+    this.totalRaceTime = 0;
+    this.raceFinished = false;
     this.displayedProgress = 0;
     this.prevSplineT = 0.0;
-    this.maxCheckpointVisited = 0;
     this.finalPosition = null;
     this.checkpoints = [];
     for (let i = 0; i < this.checkpointCount; i++) {

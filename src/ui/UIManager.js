@@ -575,13 +575,13 @@ export class UIManager {
         if (unlockText) unlockText.textContent = `NEXT CIRCUIT: ${nextLvl.badge} (${nextLvl.title})`;
       }
 
-      const isHost = !!this.multiplayerManager?.isHost;
       if (this.btnNextLevel) {
         this.btnNextLevel.style.display = 'inline-block';
-        this.btnNextLevel.textContent = isHost ? `⚡ NEXT CIRCUIT (MP) ➔` : `⏳ WAITING FOR HOST...`;
+        this.btnNextLevel.textContent = `⚡ NEXT CIRCUIT (MP) ➔`;
       }
       if (this.btnRetryRace) {
-        this.btnRetryRace.textContent = isHost ? 'RESTART RACE (MP)' : 'WAIT FOR RESTART';
+        this.btnRetryRace.style.display = 'inline-block';
+        this.btnRetryRace.textContent = 'RESTART RACE (MP)';
       }
     } else {
       // --- SINGLE PLAYER RESULTS MODE ---

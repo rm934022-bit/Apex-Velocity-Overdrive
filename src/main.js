@@ -222,14 +222,19 @@ class RacingGame {
           this.multiplayerManager.selectLevel(nextLevelId, laps);
           this.multiplayerManager.startRace();
         } else {
-          alert('Waiting for room host to launch the next circuit...');
+          // Guest requests host to advance circuit for everyone
+          console.log('[Multiplayer] Guest requesting next circuit from host...');
+          this.multiplayerManager.send({ type: 'REQUEST_NEXT_CIRCUIT' });
+          this.uiManager.showToast('Advancing party to next circuit...', 2500);
         }
       },
       onRestartMultiplayerRace: () => {
         if (this.multiplayerManager?.isHost) {
           this.multiplayerManager.startRace();
         } else {
-          alert('Waiting for room host to restart the race...');
+          console.log('[Multiplayer] Guest requesting restart from host...');
+          this.multiplayerManager.send({ type: 'REQUEST_RESTART_RACE' });
+          this.uiManager.showToast('Restarting race for party...', 2500);
         }
       },
       onReturnToMenu: () => {
@@ -717,6 +722,11 @@ class RacingGame {
 
     // Configure checkpoints
     this.checkpointSystem.setTrackSpline(spline, level.laps);
+    this.checkpointSystem.raceFinished = false;
+    this.checkpointSystem.totalRaceTime = 0;
+    this.checkpointSystem.currentLap = 1;
+    this.checkpointSystem.displayedProgress = 0;
+    this.checkpointSystem.finalPosition = null;
 
     // Stop and completely remove AI cars from the scene in multiplayer match
     this.aiRacers.forEach(ai => {
