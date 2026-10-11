@@ -2038,6 +2038,26 @@ kbd {
   animation: spin 0.8s linear infinite;
 }
 
+.mp-waiting-btn {
+  margin-left: 10px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  border-radius: 9999px;
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid #00f0ff;
+  color: #00f0ff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.mp-waiting-btn:hover {
+  background: #00f0ff;
+  color: #0f172a;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

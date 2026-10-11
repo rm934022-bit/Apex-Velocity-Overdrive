@@ -91,6 +91,7 @@ class RacingGame {
     this.p2Camera = null;
     this.p2CameraYaw = 0;
     this.p2SmoothedLookAt = new THREE.Vector3();
+    this.waitingCountdownInterval = null;
 
     // Timing
     this.lastTime = performance.now();
@@ -236,6 +237,9 @@ class RacingGame {
           this.multiplayerManager.leaveRoom();
         }
         this.returnToHomeMenu();
+      },
+      onForceShowResults: () => {
+        this._showMultiplayerResults();
       }
     });
 
@@ -247,13 +251,26 @@ class RacingGame {
       },
       onPlayerFinished: (msg) => {
         if (this.isLocalPlayerFinished) {
-          const finishedCount = msg.finishedCount || (1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length);
-          const totalCount = msg.totalCount || Math.max(2, this.multiplayerManager.room?.players?.length || 2);
-          this.uiManager.showWaitingForOthers(true, finishedCount, totalCount);
+          const unfinished = Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => !r.isFinished);
+          if (unfinished.length === 0) {
+            this._showMultiplayerResults();
+          } else {
+            const finishedCount = msg.finishedCount || (1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length);
+            const totalCount = msg.totalCount || Math.max(2, this.multiplayerManager.room?.players?.length || 2);
+            this.uiManager.showWaitingForOthers(true, finishedCount, totalCount);
+          }
         }
       },
       onAllPlayersFinished: (msg) => {
         this._showMultiplayerResults(msg.results);
+      },
+      onPlayerLeft: (playerId) => {
+        if (this.isLocalPlayerFinished && !this.multiplayerResultsShown) {
+          const unfinished = Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => !r.isFinished);
+          if (unfinished.length === 0) {
+            this._showMultiplayerResults();
+          }
+        }
       }
     });
 
@@ -594,12 +611,20 @@ class RacingGame {
     });
   }
 
+  _clearWaitingCountdown() {
+    if (this.waitingCountdownInterval) {
+      clearInterval(this.waitingCountdownInterval);
+      this.waitingCountdownInterval = null;
+    }
+  }
+
   startRaceWithLevel(levelId) {
     this._ensureAudio();
     this.isMultiplayerRace = false;
     this.isSplitScreen = false;
     this.isLocalPlayerFinished = false;
     this.multiplayerResultsShown = false;
+    this._clearWaitingCountdown();
     this.uiManager.showWaitingForOthers(false);
     if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
     this.levelManager.setLevel(levelId);
@@ -677,6 +702,7 @@ class RacingGame {
     this.isSplitScreen = false;
     this.isLocalPlayerFinished = false;
     this.multiplayerResultsShown = false;
+    this._clearWaitingCountdown();
     this.uiManager.showWaitingForOthers(false);
     if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
 
@@ -754,20 +780,37 @@ class RacingGame {
     this.multiplayerResultsShown = true;
     this.gameState = 'FINISHED';
 
+    this._clearWaitingCountdown();
     this.uiManager.showWaitingForOthers(false);
 
-    let standings = serverResults;
+    let standings = [];
+    if (serverResults) {
+      if (Array.isArray(serverResults)) {
+        standings = serverResults;
+      } else if (Array.isArray(serverResults.standings)) {
+        standings = serverResults.standings;
+      }
+    }
+
     if (!standings || standings.length === 0) {
       standings = this.multiplayerManager.getStandings(100);
     }
+
+    // Guarantee each entry has a valid position, display name, and formattedTime
+    standings = standings.map((s, idx) => ({
+      ...s,
+      position: s.position || (idx + 1),
+      name: s.name || (s.id === this.multiplayerManager.playerId || s.isLocal ? (this.multiplayerManager.playerName || 'YOU') : 'Racer'),
+      formattedTime: s.formattedTime || s.finishTime || (s.isFinished ? (this.checkpointSystem ? this.checkpointSystem.formatTime(s.time || this.checkpointSystem.totalRaceTime) : '--:--.--') : 'DNF')
+    }));
 
     const myIdx = standings.findIndex(s => s.id === this.multiplayerManager.playerId || s.isLocal);
     const myPosition = myIdx >= 0 ? (standings[myIdx].position || myIdx + 1) : 1;
 
     this.uiManager.showResults({
       position: myPosition,
-      totalTime: this.localFormattedTime || this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime),
-      bestLapTime: this.checkpointSystem.bestLapTime ? this.checkpointSystem.formatTime(this.checkpointSystem.bestLapTime) : '--:--.--',
+      totalTime: this.localFormattedTime || (this.checkpointSystem ? this.checkpointSystem.formatTime(this.checkpointSystem.totalRaceTime) : '--:--.--'),
+      bestLapTime: this.checkpointSystem?.bestLapTime ? this.checkpointSystem.formatTime(this.checkpointSystem.bestLapTime) : '--:--.--',
       isMultiplayer: true,
       standings: standings,
       nextLevelId: ((this.levelManager.currentLevelId % 5) + 1)
@@ -883,6 +926,7 @@ class RacingGame {
     this.isSplitScreen = false;
     this.isLocalPlayerFinished = false;
     this.multiplayerResultsShown = false;
+    this._clearWaitingCountdown();
     this.uiManager.showWaitingForOthers(false);
     if (this.uiManager.resultsModal) this.uiManager.resultsModal.classList.add('hidden');
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -1086,9 +1130,15 @@ class RacingGame {
       // 1. Update Player Vehicle Physics
       if (this.isMultiplayerRace && this.isLocalPlayerFinished) {
         // Smoothly coast car to halt past finish line while waiting for other racers
-        this.playerPhysics.speed = Math.max(0, this.playerPhysics.speed - delta * 14.0);
-        this.playerPhysics.velocity.multiplyScalar(0.95);
-        this.playerPhysics.handbrake = true;
+        if (this.playerPhysics.speed > 0.5) {
+          const brakeInput = { forward: -0.7, steer: 0, handbrake: false, boost: false };
+          this.playerPhysics.update(delta, brakeInput, this.trackBuilder);
+        } else {
+          this.playerPhysics.speed = 0;
+          this.playerPhysics.velocity.set(0, 0, 0);
+          const idleInput = { forward: 0, steer: 0, handbrake: false, boost: false };
+          this.playerPhysics.update(delta, idleInput, this.trackBuilder);
+        }
       } else {
         this.playerPhysics.update(delta, this.input, this.trackBuilder);
       }
@@ -1194,13 +1244,33 @@ class RacingGame {
               }
             }
 
-            const totalRacers = Math.max(2, this.multiplayerManager.room?.players?.length || (this.multiplayerManager.remoteRacers.size + 1));
-            const finishedCount = 1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length;
-            this.uiManager.showWaitingForOthers(true, finishedCount, totalRacers);
+            const unfinishedRivals = Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => !r.isFinished);
+            if (unfinishedRivals.length === 0) {
+              this._showMultiplayerResults();
+            } else {
+              let secondsRemaining = 12;
+              const totalRacers = Math.max(2, this.multiplayerManager.room?.players?.length || (this.multiplayerManager.remoteRacers.size + 1));
+              const finishedCount = 1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length;
+              this.uiManager.showWaitingForOthers(true, finishedCount, totalRacers, secondsRemaining);
+
+              this._clearWaitingCountdown();
+              this.waitingCountdownInterval = setInterval(() => {
+                secondsRemaining--;
+                if (secondsRemaining <= 0 || this.multiplayerResultsShown) {
+                  this._clearWaitingCountdown();
+                  if (!this.multiplayerResultsShown) {
+                    this._showMultiplayerResults();
+                  }
+                } else {
+                  const currentFinished = 1 + Array.from(this.multiplayerManager.remoteRacers.values()).filter(r => r.isFinished).length;
+                  this.uiManager.showWaitingForOthers(true, currentFinished, totalRacers, secondsRemaining);
+                }
+              }, 1000);
+            }
           }
 
           // Check if all remote racers have also finished
-          const allRemoteFinished = this.multiplayerManager.remoteRacers.size > 0 &&
+          const allRemoteFinished = this.multiplayerManager.remoteRacers.size === 0 ||
             Array.from(this.multiplayerManager.remoteRacers.values()).every(r => r.isFinished);
 
           if (allRemoteFinished && !this.multiplayerResultsShown) {

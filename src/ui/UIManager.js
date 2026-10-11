@@ -91,11 +91,12 @@ export class UIManager {
     }, duration);
   }
 
-  showWaitingForOthers(show = true, finishedCount = 1, totalCount = 2) {
+  showWaitingForOthers(show = true, finishedCount = 1, totalCount = 2, secondsRemaining = null) {
     if (this.mpWaitingBanner) {
       this.mpWaitingBanner.classList.toggle('hidden', !show);
       if (this.mpWaitingCount) {
-        this.mpWaitingCount.textContent = `(${finishedCount}/${totalCount})`;
+        const timeText = (secondsRemaining !== null && secondsRemaining !== undefined) ? ` • Results in ${secondsRemaining}s` : '';
+        this.mpWaitingCount.textContent = `(${finishedCount}/${totalCount})${timeText}`;
       }
     }
   }
@@ -863,6 +864,17 @@ export class UIManager {
         this.playUiClick();
         if (this.actions.onStartSplitScreen) {
           this.actions.onStartSplitScreen();
+        }
+      });
+    }
+
+    // Skip waiting button on finish banner to immediately view results
+    const btnSkipWaiting = document.getElementById('btn-mp-skip-waiting');
+    if (btnSkipWaiting) {
+      btnSkipWaiting.addEventListener('click', () => {
+        this.playUiClick();
+        if (this.actions.onForceShowResults) {
+          this.actions.onForceShowResults();
         }
       });
     }

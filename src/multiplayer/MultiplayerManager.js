@@ -630,6 +630,23 @@ export class MultiplayerManager {
         this.removeRemoteRacer(msg.playerId);
         if (this.callbacks.onPlayerLeft) this.callbacks.onPlayerLeft(msg.playerId);
         if (this.callbacks.onRoomStateChange) this.callbacks.onRoomStateChange(this.room);
+
+        // If all remaining racers have finished, broadcast final match standings
+        if (this.finishedPlayers && this.finishedPlayers.length > 0 && this.finishedPlayers.length >= this.room.players.length) {
+          const allFinishedMsg = {
+            type: 'ALL_PLAYERS_FINISHED',
+            results: {
+              isMultiplayer: true,
+              position: this.finishedPlayers.find(p => p.id === this.playerId)?.position || 1,
+              totalTime: this.finishedPlayers[0]?.formattedTime || '0:00.00',
+              bestLapTime: this.finishedPlayers[0]?.formattedTime || '0:00.00',
+              standings: this.finishedPlayers,
+              nextLevelId: ((this.room.levelId || 1) % 5) + 1
+            }
+          };
+          this._broadcast(allFinishedMsg);
+          this._handleIncomingPacket(`${this.topicBase}/broadcast`, allFinishedMsg);
+        }
       }
     }
   }
@@ -988,7 +1005,11 @@ export class MultiplayerManager {
     racer.isDrifting = !!state.isDrifting;
     racer.isBoosting = !!state.isBoosting;
     racer.lap = state.lap || 1;
-    racer.progressPct = state.progressPct || 0;
+    if (racer.isFinished) {
+      racer.progressPct = 100;
+    } else {
+      racer.progressPct = state.progressPct || 0;
+    }
   }
 
   // ===========================================================================
